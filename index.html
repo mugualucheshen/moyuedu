@@ -1522,6 +1522,27 @@
   }
   function getApiKey() { return state.settings.apiKey || ''; }
 
+  // ===== API Key 输入框状态同步 =====
+  // 有 key：input 显示 ***** + readOnly + 按钮"编辑 Key"
+  // 无 key：input 空 + 可编辑 + 按钮"保存 Key"
+  // 点"编辑 Key"：清空 + 可编辑 + focus + 按钮变"保存 Key"
+  // 点"保存 Key"：保存 + 立刻 syncApiKeyUI 切回"编辑 Key"态
+  function syncApiKeyUI() {
+    const hasKey = !!getApiKey();
+    const input = $('#apiKeyInput');
+    const btn = $('#saveApiKeyBtn');
+    if (hasKey) {
+      input.value = '*****';
+      input.readOnly = true;
+      btn.textContent = '编辑 Key';
+    } else {
+      input.value = '';
+      input.readOnly = false;
+      input.placeholder = 'sk-...';
+      btn.textContent = '保存 Key';
+    }
+  }
+
   // ===== 章节解析 =====
   function parseChapters(text, pattern) {
     // 限制标题最多 80 字符；用 (?:^|\n) 锚定每行开头
@@ -2851,10 +2872,23 @@
   });
 
   $('#saveApiKeyBtn').addEventListener('click', () => {
-    const k = $('#apiKeyInput').value.trim();
-    if (!k) return showToast('请填写 API Key');
+    const input = $('#apiKeyInput');
+    const btn = $('#saveApiKeyBtn');
+    if (btn.textContent === '编辑 Key') {
+      // 切到编辑模式：清空 + 可写 + focus
+      input.value = '';
+      input.readOnly = false;
+      input.placeholder = 'sk-...';
+      btn.textContent = '保存 Key';
+      input.focus();
+      return;
+    }
+    // 保存模式
+    const k = input.value.trim();
+    if (!k || k === '*****') return showToast('请填写 API Key');
     saveApiKey(k);
     showToast('Key 已保存');
+    syncApiKeyUI();
   });
   $('#resetPatternBtn').addEventListener('click', () => {
     state.settings.chapterPattern = DEFAULT_SETTINGS.chapterPattern;
@@ -2942,6 +2976,7 @@
     currentTabPage = 'page-home';
     renderHome();
     renderLibrary(); // 书架预渲染（虽然默认隐藏，但切换时能秒出）
+    syncApiKeyUI();   // 设置页 Key 状态同步（已保存则显示 ***** + 编辑按钮）
     checkFirstRun();
   }
   init();
