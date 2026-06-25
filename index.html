@@ -1815,6 +1815,7 @@
     // 同步 bottom bar active 态（仅对在 bar 里的目标 page）
     $$('.bb-item').forEach(b => b.classList.toggle('active', b.dataset.page === id));
     // 记录 tab 页（供 settingsBack 返回）
+    // 记录 tab 页（仅供未来扩展返回逻辑使用）
     if (id !== 'page-reader') currentTabPage = id;
     if (id === 'page-library') {
       stopTTS();
