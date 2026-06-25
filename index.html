@@ -46,9 +46,14 @@
       --header-h: 52px;
       --font-serif: "Source Han Serif SC", "Noto Serif CJK SC", "Songti SC", "STSong", "SimSun", serif;
       --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", sans-serif;
+      --font-kai: "Kaiti SC", "STKaiti", "FangSong_GB2312", "FangSong", "SimSun", serif;
+      --font-fang: "STFangsong", "FangSong_GB2312", "FangSong", serif;
       --reader-font-size: 18px;
       --reader-line-height: 1.85;
       --reader-max-width: 720px;
+      --reader-font-family: var(--font-serif);
+      --reader-padding-left: 16px;
+      --reader-padding-right: 6px;
     }
     [data-theme="night"] {
       --bg: #14110f;
@@ -467,12 +472,12 @@
       position: absolute; inset: 0;
       padding-top: calc(var(--header-h) + var(--safe-top) + 24px);
       padding-bottom: calc(80px + var(--safe-bottom));
-      /* 左 padding 16、右 padding 6：用户反馈"右边宽"，让右边留窄一点视觉对称 */
-      padding-left: max(env(safe-area-inset-left), 16px);
-      padding-right: max(env(safe-area-inset-right), 6px);
+      /* 左右间距由 settings 控制（默认左 16 / 右 6，叠加 safe-area） */
+      padding-left: max(env(safe-area-inset-left), var(--reader-padding-left));
+      padding-right: max(env(safe-area-inset-right), var(--reader-padding-right));
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
-      transition: padding-top 0.3s, padding-bottom 0.3s;
+      transition: padding-top 0.3s, padding-bottom 0.3s, padding-left 0.2s, padding-right 0.2s;
     }
     .reader-content.header-hidden { padding-top: 24px; }
     .reader-content.player-hidden { padding-bottom: 24px; }
@@ -481,11 +486,11 @@
       margin: 0 auto;
       /* 左右 padding 由 .reader-content 提供（带 safe-area + 不对称视觉对称） */
       padding: 0;
-      font-family: var(--font-serif);
+      font-family: var(--reader-font-family);
       font-size: var(--reader-font-size);
       line-height: var(--reader-line-height);
       color: var(--text);
-      transition: font-size 0.2s, line-height 0.2s;
+      transition: font-size 0.2s, line-height 0.2s, font-family 0.2s;
     }
     .reader-inner p { margin: 0 0 1em; text-indent: 2em; }
     .reader-inner .chapter-title {
@@ -662,6 +667,12 @@
     .theme-chip[data-theme="eye"]   { background: #cde4cd; }
     .theme-chip[data-theme="sepia"] { background: #ece2cc; }
     .theme-chip.active { border-color: var(--accent); transform: scale(1.04); }
+    /* 字体选择 chip：让每个 chip 显示对应字体的预览 */
+    .font-chip[data-font="serif"]  { font-family: var(--font-serif); }
+    .font-chip[data-font="sans"]   { font-family: var(--font-sans); }
+    .font-chip[data-font="kai"]    { font-family: var(--font-kai); }
+    .font-chip[data-font="fang"]   { font-family: var(--font-fang); }
+    .font-chip[data-font="system"] { font-family: -apple-system, sans-serif; }
     .slider-row { display: flex; align-items: center; gap: 14px; }
     .slider-row input[type=range] {
       flex: 1; -webkit-appearance: none; height: 4px;
@@ -1095,6 +1106,16 @@
       </div>
     </div>
     <div class="settings-section">
+      <h4>字体</h4>
+      <div class="theme-row" id="fontFamilyRow">
+        <div class="theme-chip font-chip" data-font="serif">宋体</div>
+        <div class="theme-chip font-chip" data-font="sans">黑体</div>
+        <div class="theme-chip font-chip" data-font="kai">楷体</div>
+        <div class="theme-chip font-chip" data-font="fang">仿宋</div>
+        <div class="theme-chip font-chip" data-font="system">系统</div>
+      </div>
+    </div>
+    <div class="settings-section">
       <h4>字号</h4>
       <div class="slider-row">
         <span style="font-size:14px">A</span>
@@ -1113,12 +1134,19 @@
       </div>
     </div>
     <div class="settings-section">
-      <!-- 翻页方式：滚动模式已禁用，统一为点击翻页。此处保留为预留扩展位 -->
-      <div id="pageModeSeg" hidden></div>
+      <h4>左右间距</h4>
+      <div class="slider-row">
+        <span style="font-size:11px;color:var(--text-tertiary)">左</span>
+        <input type="range" id="readerPadLeftSlider" min="0" max="40" step="1" value="16" />
+        <span class="slider-value" id="readerPadLeftVal">16</span>
+      </div>
+      <div class="slider-row" style="margin-top:8px">
+        <span style="font-size:11px;color:var(--text-tertiary)">右</span>
+        <input type="range" id="readerPadRightSlider" min="0" max="40" step="1" value="6" />
+        <span class="slider-value" id="readerPadRightVal">6</span>
+      </div>
     </div>
-    <div class="settings-section">
-      <button class="btn btn-block" id="closeSettings">完成</button>
-    </div>
+    <!-- 完成按钮已删：点击 panel 外的阅读区自动关闭 -->
   </div>
 
   <!-- 上传/添加书籍模态 -->
@@ -1319,6 +1347,9 @@
     fontSize: 18,
     lineHeight: 1.85,
     theme: 'light',
+    fontFamily: 'serif',       // 'serif' | 'sans' | 'kai' | 'fang' | 'system'
+    readerPaddingLeft: 16,     // 阅读器正文左边距 (px)
+    readerPaddingRight: 6,     // 阅读器正文右边距 (px)
     chapterPattern: '第[一二三四五六七八九十百千万零〇\\d]+[章节回卷集部篇]',
     // ===== 合成与缓存（v1.1 新增，软设置，UI 可调）=====
     ttsParagraphsPerRequest: 2,    // 单次合成段落数
@@ -1829,12 +1860,16 @@
     state.headerVisible = true;
     updateChrome();
     // 同步状态
-    $$('.theme-chip').forEach(c => c.classList.toggle('active', c.dataset.theme === state.settings.theme));
+    $$('.theme-chip[data-theme]').forEach(c => c.classList.toggle('active', c.dataset.theme === state.settings.theme));
+    $$('.font-chip').forEach(c => c.classList.toggle('active', c.dataset.font === state.settings.fontFamily));
     $('#fontSizeSlider').value = state.settings.fontSize;
     $('#fontSizeVal').textContent = state.settings.fontSize;
     $('#lineHeightSlider').value = state.settings.lineHeight;
     $('#lineHeightVal').textContent = state.settings.lineHeight.toFixed(2);
-    $$('#pageModeSeg .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === state.settings.pageMode));
+    $('#readerPadLeftSlider').value = state.settings.readerPaddingLeft;
+    $('#readerPadLeftVal').textContent = state.settings.readerPaddingLeft;
+    $('#readerPadRightSlider').value = state.settings.readerPaddingRight;
+    $('#readerPadRightVal').textContent = state.settings.readerPaddingRight;
     $('#readerSettings').classList.add('show');
   }
   function closeReaderSettings() {
@@ -1852,6 +1887,30 @@
   function applyReaderSettings() {
     document.documentElement.style.setProperty('--reader-font-size', state.settings.fontSize + 'px');
     document.documentElement.style.setProperty('--reader-line-height', state.settings.lineHeight);
+  }
+
+  // 字体预设 → CSS 变量名映射
+  const FONT_FAMILY_MAP = {
+    serif:  '--font-serif',
+    sans:   '--font-sans',
+    kai:    '--font-kai',
+    fang:   '--font-fang',
+    system: '',   // 系统默认：直接用 -apple-system, sans-serif
+  };
+  function applyReaderFontFamily() {
+    const v = state.settings.fontFamily || 'serif';
+    const varName = FONT_FAMILY_MAP[v];
+    if (v === 'system') {
+      document.documentElement.style.setProperty('--reader-font-family',
+        '-apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", sans-serif');
+    } else if (varName) {
+      const cur = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+      document.documentElement.style.setProperty('--reader-font-family', cur);
+    }
+  }
+  function applyReaderPadding() {
+    document.documentElement.style.setProperty('--reader-padding-left', state.settings.readerPaddingLeft + 'px');
+    document.documentElement.style.setProperty('--reader-padding-right', state.settings.readerPaddingRight + 'px');
   }
 
   // ===== 页面切换 =====
@@ -2659,7 +2718,7 @@
     if (e.target === e.currentTarget) closeToc();
   });
   $('#readerSettingsBtn').addEventListener('click', openReaderSettings);
-  $('#closeSettings').addEventListener('click', closeReaderSettings);
+  // closeSettings 按钮已删，改为点击 panel 外区域关闭（见下方 document click 监听）
 
   // 长按进入编辑模式（删除）
   let pressTimer = null;
@@ -2830,11 +2889,21 @@
 
 
   // ===== 阅读器设置交互 =====
-  $$('.theme-chip').forEach(c => {
+  $$('.theme-chip[data-theme]').forEach(c => {
     c.addEventListener('click', () => {
       applyTheme(c.dataset.theme);
-      $$('.theme-chip').forEach(x => x.classList.remove('active'));
+      $$('.theme-chip[data-theme]').forEach(x => x.classList.remove('active'));
       c.classList.add('active');
+    });
+  });
+  // 字体选择（仅 font-chip，不影响主题 chip）
+  $$('.font-chip').forEach(c => {
+    c.addEventListener('click', () => {
+      state.settings.fontFamily = c.dataset.font;
+      $$('.font-chip').forEach(x => x.classList.remove('active'));
+      c.classList.add('active');
+      applyReaderFontFamily();
+      saveSettings();
     });
   });
   $('#fontSizeSlider').addEventListener('input', e => {
@@ -2849,13 +2918,32 @@
     applyReaderSettings();
     saveSettings();
   });
-  $$('#pageModeSeg .seg-btn').forEach(b => {
-    b.addEventListener('click', () => {
-      state.settings.pageMode = b.dataset.mode;
-      $$('#pageModeSeg .seg-btn').forEach(x => x.classList.remove('active'));
-      b.classList.add('active');
-      saveSettings();
-    });
+  // 左右间距 slider
+  $('#readerPadLeftSlider').addEventListener('input', e => {
+    state.settings.readerPaddingLeft = parseInt(e.target.value, 10);
+    $('#readerPadLeftVal').textContent = e.target.value;
+    applyReaderPadding();
+    saveSettings();
+  });
+  $('#readerPadRightSlider').addEventListener('input', e => {
+    state.settings.readerPaddingRight = parseInt(e.target.value, 10);
+    $('#readerPadRightVal').textContent = e.target.value;
+    applyReaderPadding();
+    saveSettings();
+  });
+
+  // 点击空白处关闭阅读器设置面板：
+  // 1) 点 readerSettings 内部 / 齿轮按钮 → 不关
+  // 2) 点阅读区(reader-content) → 关
+  // 3) 点 panel 自身 padding 区域 → 关
+  // 实现：document click，target 不在 #readerSettings 也不在 #readerSettingsBtn 内 → 关
+  document.addEventListener('click', (e) => {
+    const settings = $('#readerSettings');
+    if (!settings || !settings.classList.contains('show')) return;
+    const t = e.target;
+    if (settings.contains(t)) return;           // panel 内点击：忽略
+    if ($('#readerSettingsBtn')?.contains(t)) return; // 齿轮按钮：忽略（避免点击穿透）
+    closeReaderSettings();
   });
 
   // ===== 设置页 =====
@@ -3016,6 +3104,8 @@
     loadMeta();
     applyTheme(state.settings.theme);
     applyReaderSettings();
+    applyReaderFontFamily();
+    applyReaderPadding();
     currentTabPage = 'page-home';
     renderHome();
     renderLibrary(); // 书架预渲染（虽然默认隐藏，但切换时能秒出）
