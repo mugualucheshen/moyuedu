@@ -439,19 +439,27 @@
     .reader-header.show { transform: translateY(0); }
     .reader-header-inner {
       height: var(--header-h);
-      display: flex; align-items: center; justify-content: space-between;
+      display: grid;
+      /* 1fr 2fr 1fr 强制三等分：左 1 按钮 / 中 书名 / 右 2 按钮(包成 1 个 item)
+         → 书名列几何中心 = 屏幕中心，彻底居中（不再被左侧 1 按钮 + 右侧 2 按钮数量差挤偏） */
+      grid-template-columns: 1fr 2fr 1fr;
+      align-items: center;
       padding: 0 8px;
     }
     .reader-header .book-title-header {
       font-family: var(--font-serif);
       font-size: 15px; font-weight: 600;
-      flex: 1; text-align: center;
+      grid-column: 2;
+      text-align: center;
       padding: 0 8px;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    /* 右侧 2 个按钮包成一个 flex 项，让 header 左右对称，
-       书名 div 几何中心 = 屏幕中心，不再被挤向左 */
+    /* 左侧返回按钮固定在左列起点 */
+    #readerBack { grid-column: 1; justify-self: start; }
+    /* 右侧 2 按钮包成一个 grid item，右列终点对齐 */
     .reader-header-actions {
+      grid-column: 3;
+      justify-self: end;
       display: flex;
     }
 
@@ -459,9 +467,9 @@
       position: absolute; inset: 0;
       padding-top: calc(var(--header-h) + var(--safe-top) + 24px);
       padding-bottom: calc(80px + var(--safe-bottom));
-      /* 适配 iPhone 刘海 / home indicator 的左右安全区，让正文左右间距对称 */
+      /* 左 padding 16、右 padding 6：用户反馈"右边宽"，让右边留窄一点视觉对称 */
       padding-left: max(env(safe-area-inset-left), 16px);
-      padding-right: max(env(safe-area-inset-right), 16px);
+      padding-right: max(env(safe-area-inset-right), 6px);
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
       transition: padding-top 0.3s, padding-bottom 0.3s;
@@ -471,7 +479,8 @@
     .reader-inner {
       max-width: var(--reader-max-width);
       margin: 0 auto;
-      padding: 0 22px;
+      /* 左右 padding 由 .reader-content 提供（带 safe-area + 不对称视觉对称） */
+      padding: 0;
       font-family: var(--font-serif);
       font-size: var(--reader-font-size);
       line-height: var(--reader-line-height);
