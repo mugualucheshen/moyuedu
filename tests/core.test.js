@@ -253,6 +253,165 @@ const expect = (name, actual, expected) => {
   console.log(`  实际耗时: ${dt}ms, 文本 ${(big.length/1e6).toFixed(1)}MB, ${chs.length} 章`);
 }
 
+// ===== v1.1 合成与缓存系统：纯函数测试 =====
+
+// djb2 hash
+function djb2(str) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
+// 字符过滤（与 index.html 中 filterTtsText 逻辑一致）
+function filterTtsText(text, filterChars) {
+  if (!filterChars) return text;
+  let out = '';
+  for (const ch of text) if (!filterChars.includes(ch)) out += ch;
+  return out;
+}
+
+// 段落组合并（与 index.html 中 buildSegment 逻辑一致）
+// 输入 sentences 数组（[{textContent}]），startIdx, N, M
+function buildSegment(sentences, startIdx, n, maxChars) {
+  const items = [];
+  let chars = 0;
+  const end = Math.min(sentences.length, startIdx + n);
+  for (let i = startIdx; i < end; i++) {
+    const text = (sentences[i]?.textContent || '').trim();
+    if (!text) continue;
+    if (chars > 0 && chars + text.length > maxChars) break;
+    items.push({ text, idx: i });
+    chars += text.length;
+  }
+  if (items.length === 0) {
+    for (let i = startIdx; i < sentences.length; i++) {
+      const text = (sentences[i]?.textContent || '').trim();
+      if (text) { items.push({ text, idx: i }); chars = text.length; break; }
+    }
+  }
+  return { items, totalChars: chars, endIdx: items.length ? items[items.length - 1].idx + 1 : startIdx + 1 };
+}
+
+// T11: 段落组合并
+{
+  // 模拟 5 个句子，每个 60 字
+  const sents = Array.from({length: 5}, (_, i) => ({
+    textContent: '字'.repeat(60),
+  }));
+  // N=2, M=120 → 取 2 段共 120 字
+  const a = buildSegment(sents, 0, 2, 120);
+  expect('T11.1 正常合并 2 段 120 字', a.items.length, 2);
+  expect('T11.2 totalChars=120', a.totalChars, 120);
+  expect('T11.3 endIdx=2', a.endIdx, 2);
+
+  // N=2 但只剩 1 段（不强凑）
+  const b = buildSegment(sents, 4, 2, 120);
+  expect('T11.4 末尾不强凑', b.items.length, 1);
+  expect('T11.5 末尾 endIdx=5', b.endIdx, 5);
+
+  // M 软上限：下一句会超 120 → 停止
+  // 句子长 [80, 80, 80]，N=3, M=120 → 取 [80]，加下一个 80 超 → 只取 1 段
+  const sents2 = [{textContent:'字'.repeat(80)}, {textContent:'字'.repeat(80)}, {textContent:'字'.repeat(80)}];
+  const c = buildSegment(sents2, 0, 3, 120);
+  expect('T11.6 字数软上限不切句子', c.items.length, 1);
+  expect('T11.7 不切句子（80字）', c.totalChars, 80);
+
+  // 空句跳过
+  const sents3 = [{textContent:''}, {textContent:'有内容'}, {textContent:'',}, {textContent:'第二句'}];
+  const d = buildSegment(sents3, 0, 4, 100);
+  expect('T11.8 跳过空句', d.items.length, 2);
+
+  // 兜底：startIdx 是空句，循环往后找首个非空
+  const sents4 = [{textContent:''}, {textContent:''}, {textContent:'找到你了'}];
+  const e = buildSegment(sents4, 0, 3, 100);
+  expect('T11.9 跳过空句找到首个非空', e.items.length, 1);
+  expect('T11.9b 拿到的是 idx=2 的句子', e.items[0]?.idx, 2);
+}
+
+// T12: 字符过滤
+{
+  expect('T12.1 默认 / []', filterTtsText('你好/世界 [测试]', '/ []'), '你好世界测试');
+  expect('T12.2 空字符集=原样', filterTtsText('hello', ''), 'hello');
+  expect('T12.3 null=原样', filterTtsText('hello', null), 'hello');
+  expect('T12.4 中文场景', filterTtsText('第1章 / 楔子', '/ '), '第1章楔子');
+  expect('T12.5 重复字符只删一次', filterTtsText('aaa', 'a'), '');
+}
+
+// T13: cacheKey hash（djb2 一致性 + 不同输入产出不同 hash）
+{
+  const a = djb2('text-a');
+  const b = djb2('text-a');
+  const c = djb2('text-b');
+  expect('T13.1 同输入同 hash', a === b, true);
+  expect('T13.2 异输入异 hash', a !== c, true);
+
+  // 模拟 voiceConfig hash：ttsMode + presetVoice + speed
+  const v1 = djb2(['preset', '冰糖', '', '', '', '1'].join('||'));
+  const v2 = djb2(['preset', '磁性', '', '', '', '1'].join('||'));
+  expect('T13.3 不同音色 hash 不同', v1 !== v2, true);
+
+  const v3 = djb2(['preset', '冰糖', '', '', '', '1'].join('||'));
+  expect('T13.4 同样配置 hash 一致', v1 === v3, true);
+}
+
+// T14: LRU 清理逻辑（mock 一个简化版的 IndexedDB）
+{
+  // 模拟 store: 数组，按 lastUsedAt 排序淘汰
+  const store = new Map(); // key -> {size, lastUsedAt}
+  function put(key, size) {
+    store.set(key, { size, lastUsedAt: Date.now() + Math.random() });
+  }
+  function totalSize() {
+    let s = 0; for (const v of store.values()) s += v.size; return s;
+  }
+  function prune(limitBytes) {
+    let total = totalSize();
+    if (total <= limitBytes) return 0;
+    const sorted = [...store.entries()].sort((a, b) => a[1].lastUsedAt - b[1].lastUsedAt);
+    let freed = 0;
+    const need = total - limitBytes;
+    let n = 0;
+    for (const [k, v] of sorted) {
+      if (freed >= need) break;
+      store.delete(k);
+      freed += v.size;
+      n++;
+    }
+    return n;
+  }
+
+  // 写 5 个各 30MB，超 100MB 限制应清掉旧的
+  put('a', 30 * 1024 * 1024);
+  put('b', 30 * 1024 * 1024);
+  put('c', 30 * 1024 * 1024);
+  put('d', 30 * 1024 * 1024);
+  put('e', 30 * 1024 * 1024);
+  expect('T14.1 5个30MB=150MB', totalSize(), 150 * 1024 * 1024);
+  // 现在手动设置 lastUsedAt 让 a < b < c < d < e
+  const entries = [...store.entries()];
+  entries.sort((x, y) => x[0].localeCompare(y[0])); // a,b,c,d,e
+  entries.forEach(([k], i) => store.get(k).lastUsedAt = i);
+  const pruned = prune(100 * 1024 * 1024); // 限制 100MB
+  expect('T14.2 超限清理', pruned >= 1, true);
+  expect('T14.3 清理后剩余 ≤ 100MB', totalSize() <= 100 * 1024 * 1024, true);
+  expect('T14.4 最旧的被清', !store.has('a'), true);
+  expect('T14.5 最新的 e 保留', store.has('e'), true);
+
+  // 未超限不清理
+  store.clear();
+  put('x', 10 * 1024 * 1024);
+  expect('T14.6 未超限不清理', prune(100 * 1024 * 1024), 0);
+}
+
+// T15: 软上限行为——一合并就超 M，允许不切
+{
+  // 句子长 200 字，N=1, M=120 → 取 1 段 200 字（不切）
+  const sents = [{textContent:'字'.repeat(200)}];
+  const seg = buildSegment(sents, 0, 1, 120);
+  expect('T15.1 单段超字数不切', seg.items.length, 1);
+  expect('T15.2 保留完整 200 字', seg.totalChars, 200);
+}
+
 console.log('\n==========');
 const pass = tests.filter(t => t.pass).length;
 console.log(`通过: ${pass}/${tests.length}`);

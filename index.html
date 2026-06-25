@@ -793,7 +793,6 @@
           </button>
         </div>
       </div>
-
       <div class="reader-tap-zones">
         <div class="left-zone" id="tapLeft"></div>
         <div class="center-zone" id="tapCenter"></div>
@@ -834,6 +833,53 @@
             </div>
             <div class="settings-row" style="flex-direction:column;align-items:stretch;gap:10px">
               <button class="btn" id="resetPatternBtn">恢复默认</button>
+            </div>
+          </div>
+
+          <!-- 合成与缓存（v1.1 新增） -->
+          <div class="settings-group">
+            <div style="padding:12px 16px 6px;font-size:12px;color:var(--text-tertiary);letter-spacing:0.5px">合成与缓存</div>
+            <div class="settings-row">
+              <div class="label">单次合成段落数</div>
+              <div class="control" style="display:flex;align-items:center;gap:8px">
+                <button class="btn step-btn" data-step-key="ttsParagraphsPerRequest" data-delta="-1" style="width:34px;height:34px;padding:0;border-radius:50%">−</button>
+                <span class="step-val" id="val_ttsParagraphsPerRequest" style="min-width:32px;text-align:center;font-size:15px;font-weight:500">2</span>
+                <button class="btn step-btn" data-step-key="ttsParagraphsPerRequest" data-delta="1" style="width:34px;height:34px;padding:0;border-radius:50%">+</button>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="label">单次合成最大字数</div>
+              <div class="control" style="display:flex;align-items:center;gap:8px">
+                <button class="btn step-btn" data-step-key="ttsMaxCharsPerRequest" data-delta="-10" style="width:34px;height:34px;padding:0;border-radius:50%">−</button>
+                <span class="step-val" id="val_ttsMaxCharsPerRequest" style="min-width:32px;text-align:center;font-size:15px;font-weight:500">120</span>
+                <button class="btn step-btn" data-step-key="ttsMaxCharsPerRequest" data-delta="10" style="width:34px;height:34px;padding:0;border-radius:50%">+</button>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="label">音频文件最大缓存 (MB)</div>
+              <div class="control" style="display:flex;align-items:center;gap:8px">
+                <button class="btn step-btn" data-step-key="ttsCacheSizeMB" data-delta="-50" style="width:34px;height:34px;padding:0;border-radius:50%">−</button>
+                <span class="step-val" id="val_ttsCacheSizeMB" style="min-width:36px;text-align:center;font-size:15px;font-weight:500">500</span>
+                <button class="btn step-btn" data-step-key="ttsCacheSizeMB" data-delta="50" style="width:34px;height:34px;padding:0;border-radius:50%">+</button>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="label">预合成并发数</div>
+              <div class="control" style="display:flex;align-items:center;gap:8px">
+                <button class="btn step-btn" data-step-key="ttsPrefetchConcurrency" data-delta="-1" style="width:34px;height:34px;padding:0;border-radius:50%">−</button>
+                <span class="step-val" id="val_ttsPrefetchConcurrency" style="min-width:32px;text-align:center;font-size:15px;font-weight:500">2</span>
+                <button class="btn step-btn" data-step-key="ttsPrefetchConcurrency" data-delta="1" style="width:34px;height:34px;padding:0;border-radius:50%">+</button>
+              </div>
+            </div>
+            <div class="settings-row" id="filterCharsRow" style="cursor:pointer">
+              <div class="label">过滤特殊字符<div class="sublabel">合成前删除这些字符</div></div>
+              <div class="control" style="display:flex;align-items:center;gap:6px;color:var(--text-secondary);font-size:13px">
+                <span id="filterCharsPreview">/ []</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg>
+              </div>
+            </div>
+            <div class="settings-row" style="flex-direction:column;align-items:stretch;gap:8px">
+              <button class="btn" id="clearTtsCacheBtn" style="color:#c0392b;border-color:rgba(192,57,43,0.3)">清空音频缓存</button>
             </div>
           </div>
 
@@ -907,11 +953,8 @@
       </div>
     </div>
     <div class="settings-section">
-      <h4>翻页方式</h4>
-      <div class="seg-control" id="pageModeSeg">
-        <button class="seg-btn active" data-mode="scroll">滚动</button>
-        <button class="seg-btn" data-mode="flip">翻页</button>
-      </div>
+      <!-- 翻页方式：滚动模式已禁用，统一为点击翻页。此处保留为预留扩展位 -->
+      <div id="pageModeSeg" hidden></div>
     </div>
     <div class="settings-section">
       <button class="btn btn-block" id="closeSettings">完成</button>
@@ -1066,6 +1109,24 @@
     </div>
   </div>
 
+  <!-- 过滤特殊字符编辑弹窗（v1.1） -->
+  <div class="modal" id="filterCharsModal">
+    <div class="modal-card">
+      <h3>过滤特殊字符</h3>
+      <p>合成前过滤输入的字符，避免TTS合成失败</p>
+      <div class="input-row" style="padding:0;border:none">
+        <input type="text" id="filterCharsInput" placeholder="例如: / []" style="font-family:var(--font-mono,monospace)" />
+      </div>
+      <div style="font-size:12px;color:var(--text-tertiary);margin-top:10px">
+        每个字符独立匹配并删除。空格也会被算作一个字符。
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="filterCharsCancel">取消</button>
+        <button class="btn primary" id="filterCharsConfirm">确定</button>
+      </div>
+    </div>
+  </div>
+
   <script>
   /* =========================================================
      墨阅读 · 核心逻辑
@@ -1081,9 +1142,10 @@
     FIRST_RUN: 'moyuedu_first_run',
   };
   const DB_NAME = 'moyuedu_db';
-  const DB_VERSION = 1;
+  const DB_VERSION = 2;
   const STORE_BOOKS = 'books';
   const STORE_AUDIO = 'audio';
+  const STORE_TTS_CACHE = 'ttsCache';
 
   const DEFAULT_SETTINGS = {
     ttsMode: 'preset',
@@ -1098,6 +1160,12 @@
     lineHeight: 1.85,
     theme: 'light',
     chapterPattern: '第[一二三四五六七八九十百千万零〇\\d]+[章节回卷集部篇]',
+    // ===== 合成与缓存（v1.1 新增，软设置，UI 可调）=====
+    ttsParagraphsPerRequest: 2,    // 单次合成段落数
+    ttsMaxCharsPerRequest: 120,    // 单次合成最大字数（软上限）
+    ttsCacheSizeMB: 500,           // 音频文件最大缓存 (MB)
+    ttsPrefetchConcurrency: 2,     // 预合成并发数
+    ttsFilterChars: '/ []',        // 合成前过滤的特殊字符
   };
   const SORT_OPTIONS = [
     { key: 'recent', label: '最近' },
@@ -1137,6 +1205,11 @@
         const db = e.target.result;
         if (!db.objectStoreNames.contains(STORE_BOOKS)) db.createObjectStore(STORE_BOOKS, { keyPath: 'id' });
         if (!db.objectStoreNames.contains(STORE_AUDIO)) db.createObjectStore(STORE_AUDIO, { keyPath: 'id' });
+        if (!db.objectStoreNames.contains(STORE_TTS_CACHE)) {
+          // TTS 合成音频缓存：keyPath='key'（cacheKey），索引 lastUsedAt 用于 LRU
+          const s = db.createObjectStore(STORE_TTS_CACHE, { keyPath: 'key' });
+          s.createIndex('lastUsedAt', 'lastUsedAt', { unique: false });
+        }
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -1665,6 +1738,207 @@
     renderLibrary();
   });
 
+  // ===== TTS 合成与缓存系统（v1.1）=====
+  // - 段落组合并：单次合成 N 段，最多 M 字（软上限，不切句子）
+  // - 字符过滤：合成前删除特殊字符（避免 TTS 报错/怪声）
+  // - IndexedDB 缓存：key = bookId|startIdx|endIdx|voiceHash|textHash
+  // - LRU 清理：超 500MB 按 lastUsedAt 升序淘汰
+  // - 预合成：当前段播放时后台并发合成下一段，缓存命中后无缝衔接
+
+  // 字符过滤：每个字符独立删除（不会引入奇怪停顿）
+  function filterTtsText(text) {
+    const chars = state.settings.ttsFilterChars || '';
+    if (!chars) return text;
+    let out = '';
+    for (const ch of text) {
+      if (!chars.includes(ch)) out += ch;
+    }
+    return out;
+  }
+
+  // 把 4 个关键配置 hash 起来（不同音色/语速/参考音频不能复用缓存）
+  function getVoiceConfigHash() {
+    const s = state.settings;
+    const parts = [
+      s.ttsMode || 'preset',
+      s.presetVoice || '',
+      s.presetStyle || '',
+      s.designDesc || '',
+      s.cloneName || '',   // 用名字而不是 base64（base64 太长，且同名即为同一参考音频）
+      String(s.speed || 1),
+    ];
+    let h = 5381;
+    const str = parts.join('||');
+    for (let i = 0; i < str.length; i++) {
+      h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+    }
+    return 'v' + (h >>> 0).toString(36);
+  }
+
+  // djb2 文本 hash
+  function hashText(text) {
+    let h = 5381;
+    for (let i = 0; i < text.length; i++) {
+      h = ((h << 5) + h + text.charCodeAt(i)) | 0;
+    }
+    return (h >>> 0).toString(36);
+  }
+
+  // 段落组合并：从 startIdx 起，最多取 N 段，累计字数 ≤ maxChars（软上限）
+  // 返回 { items: [{text, idx}], totalChars, endIdx }
+  // - 凑不到 N 段不强凑
+  // - 超字数时按句子边界停（不切句子）
+  // - 全是空句时兜底取第 1 段
+  function buildSegment(sentences, startIdx, n, maxChars) {
+    const items = [];
+    let chars = 0;
+    const end = Math.min(sentences.length, startIdx + n);
+    for (let i = startIdx; i < end; i++) {
+      const text = (sentences[i]?.textContent || '').trim();
+      if (!text) continue;
+      if (chars > 0 && chars + text.length > maxChars) break;
+      items.push({ text, idx: i });
+      chars += text.length;
+    }
+    if (items.length === 0) {
+      // 兜底：从 startIdx 起找第一个非空句（避免 startIdx 本身是空句时跳过）
+      for (let i = startIdx; i < sentences.length; i++) {
+        const text = (sentences[i]?.textContent || '').trim();
+        if (text) {
+          items.push({ text, idx: i });
+          chars = text.length;
+          break;
+        }
+      }
+    }
+    return {
+      items,
+      totalChars: chars,
+      endIdx: items.length ? items[items.length - 1].idx + 1 : startIdx + 1,
+    };
+  }
+
+  // 拼接段落组文本（用于 TTS 请求）
+  function concatSegmentText(items) {
+    return items.map(x => x.text).join('');
+  }
+
+  // === 缓存层 ===
+  async function cacheGet(key) {
+    try {
+      const db = await openDB();
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_TTS_CACHE, 'readwrite');
+        const store = tx.objectStore(STORE_TTS_CACHE);
+        const req = store.get(key);
+        req.onsuccess = () => {
+          const rec = req.result;
+          if (rec) {
+            rec.lastUsedAt = Date.now();
+            store.put(rec);
+          }
+          resolve(rec || null);
+        };
+        req.onerror = () => reject(req.error);
+      });
+    } catch (e) {
+      console.warn('[ttsCache] get failed', e);
+      return null;
+    }
+  }
+
+  async function cachePut(key, blob, format, extra) {
+    try {
+      const rec = {
+        key,
+        blob,
+        format,
+        size: blob.size || 0,
+        lastUsedAt: Date.now(),
+        createdAt: Date.now(),
+        ...(extra || {}),
+      };
+      const db = await openDB();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_TTS_CACHE, 'readwrite');
+        tx.objectStore(STORE_TTS_CACHE).put(rec);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+      // 异步 LRU 清理（不阻塞）
+      pruneCacheIfNeeded().catch(err => console.warn('[ttsCache] LRU failed', err));
+    } catch (e) {
+      console.warn('[ttsCache] put failed', e);
+    }
+  }
+
+  async function cacheTotalSize() {
+    try {
+      const db = await openDB();
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_TTS_CACHE, 'readonly');
+        const req = tx.objectStore(STORE_TTS_CACHE).getAll();
+        req.onsuccess = () => {
+          const all = req.result || [];
+          return resolve(all.reduce((s, r) => s + (r.size || 0), 0));
+        };
+        req.onerror = () => reject(req.error);
+      });
+    } catch { return 0; }
+  }
+
+  async function pruneCacheIfNeeded() {
+    const limitMB = state.settings.ttsCacheSizeMB || 500;
+    const limitBytes = limitMB * 1024 * 1024;
+    let total = await cacheTotalSize();
+    if (total <= limitBytes) return;
+    const db = await openDB();
+    const all = await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_TTS_CACHE, 'readonly');
+      const req = tx.objectStore(STORE_TTS_CACHE).getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+    all.sort((a, b) => (a.lastUsedAt || 0) - (b.lastUsedAt || 0));
+    let freed = 0;
+    const needFree = total - limitBytes;
+    const toDelete = [];
+    for (const rec of all) {
+      if (freed >= needFree) break;
+      toDelete.push(rec.key);
+      freed += (rec.size || 0);
+    }
+    if (toDelete.length === 0) return;
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_TTS_CACHE, 'readwrite');
+      const store = tx.objectStore(STORE_TTS_CACHE);
+      toDelete.forEach(k => store.delete(k));
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    console.log(`[ttsCache] LRU pruned ${toDelete.length} entries, freed ${(freed/1024/1024).toFixed(1)}MB`);
+  }
+
+  async function cacheClear() {
+    try {
+      const db = await openDB();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_TTS_CACHE, 'readwrite');
+        tx.objectStore(STORE_TTS_CACHE).clear();
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch (e) { console.warn('[ttsCache] clear failed', e); }
+  }
+
+  // 当前章节对应的 cacheKey 前缀（章节切换时变化，预合成队列需清空）
+  function currentChapterCachePrefix() {
+    const bookId = state.currentBookId || 'nobook';
+    const chIdx = state.currentChapterIdx != null ? state.currentChapterIdx : 0;
+    const vh = getVoiceConfigHash();
+    return `${bookId}::ch${chIdx}::${vh}`;
+  }
+
   // ===== TTS 听书 =====
   // 当前播放的 audio 元素、播放状态
   const tts = {
@@ -1673,6 +1947,15 @@
     isLoading: false,
     currentBlobUrl: null,
     currentSentenceIdx: 0,
+    // === v1.1 段级调度状态 ===
+    scheduler: {
+      currentSegment: null,    // { items, startIdx, endIdx }
+      prefetchSet: new Set(),  // 已发起预合成的 startIdx
+      prefetchInflight: 0,     // 当前并发数
+      chapterEpoch: 0,         // 章节切换 +1（旧预合成识别后丢弃）
+      charOffsets: [],         // 当前段每个句子的字符偏移表（timeupdate 高亮定位）
+      totalChars: 0,
+    },
   };
   function stopTTS() {
     if (tts.audio) {
@@ -1685,6 +1968,11 @@
     }
     tts.isPlaying = false;
     tts.isLoading = false;
+    // v1.1：让所有在飞的预合成任务识别后退出
+    tts.scheduler.chapterEpoch++;
+    tts.scheduler.prefetchSet.clear();
+    tts.scheduler.prefetchInflight = 0;
+    tts.scheduler.currentSegment = null;
     clearSpeakingHighlight();
     updatePlayUI();
   }
@@ -1785,6 +2073,158 @@
     throw new Error('音频字段格式未知');
   }
 
+  // 段级播放：拿到 segment 的 items / startIdx / endIdx，查缓存/合成、播放
+  async function playSegment(items, startIdx, endIdx) {
+    if (items.length === 0) {
+      // 没句子可播（极端），跳到下一段
+      return playSentence(endIdx);
+    }
+    const joinedText = concatSegmentText(items);
+    const filteredText = filterTtsText(joinedText);
+    const prefix = currentChapterCachePrefix();
+    const key = `${prefix}|s${startIdx}|e${endIdx}|t${hashText(filteredText)}`;
+
+    // 缓存查询
+    let blob, format = 'wav';
+    const cached = await cacheGet(key);
+    if (cached) {
+      blob = cached.blob;
+      format = cached.format || 'wav';
+    } else {
+      const { base64, format: fmt } = await callMimoTTS(filteredText);
+      format = fmt || 'wav';
+      const mime = format === 'pcm16' ? 'audio/pcm' : 'audio/' + format;
+      blob = base64ToBlob(base64, mime);
+      // 写缓存（异步，失败不影响播放）
+      cachePut(key, blob, format, { startIdx, endIdx, chars: filteredText.length });
+    }
+
+    if (tts.currentBlobUrl) URL.revokeObjectURL(tts.currentBlobUrl);
+    tts.currentBlobUrl = URL.createObjectURL(blob);
+
+    // 段内字符偏移表（用于 timeupdate 高亮）
+    const offsets = [0];
+    {
+      let acc = 0;
+      for (const it of items) {
+        acc += it.text.length;
+        offsets.push(acc);
+      }
+    }
+    tts.scheduler.charOffsets = offsets;
+    tts.scheduler.totalChars = offsets[offsets.length - 1] || 1;
+    tts.scheduler.currentSegment = { items, startIdx, endIdx };
+
+    const audio = new Audio(tts.currentBlobUrl);
+    audio.playbackRate = parseFloat(state.settings.speed) || 1.0;
+
+    const epochAtPlay = tts.scheduler.chapterEpoch;
+    const nextStartIdx = endIdx;
+
+    audio.onended = () => {
+      if (epochAtPlay !== tts.scheduler.chapterEpoch) return; // 章节已切换
+      tts.isPlaying = false;
+      playSentence(nextStartIdx);
+    };
+    audio.onerror = () => {
+      showToast('音频播放失败');
+      stopTTS();
+    };
+    // 段内高亮：根据 currentTime / duration 比例定位字符位置，再二分查表
+    audio.ontimeupdate = () => {
+      if (!audio.duration || isNaN(audio.duration)) return;
+      const ratio = Math.min(1, Math.max(0, audio.currentTime / audio.duration));
+      const charPos = Math.min(tts.scheduler.totalChars - 1, Math.floor(ratio * tts.scheduler.totalChars));
+      let itemIdx = 0;
+      for (let i = 0; i < tts.scheduler.charOffsets.length - 1; i++) {
+        if (charPos >= tts.scheduler.charOffsets[i] && charPos < tts.scheduler.charOffsets[i + 1]) {
+          itemIdx = i;
+          break;
+        }
+        itemIdx = i;
+      }
+      const sentenceIdx = items[itemIdx]?.idx;
+      if (sentenceIdx != null && sentenceIdx !== tts.currentSentenceIdx) {
+        tts.currentSentenceIdx = sentenceIdx;
+        highlightSentence(sentenceIdx);
+        updateNowPlaying();
+      }
+    };
+
+    tts.audio = audio;
+    tts.isLoading = false;
+    tts.isPlaying = true;
+    updatePlayUI();
+    updateNowPlaying();
+    setupMediaSession(joinedText);
+
+    try {
+      await audio.play();
+    } catch (e) {
+      showToast('需要用户交互才能播放');
+      stopTTS();
+      return;
+    }
+
+    // 当前段开始播放后，并发预合成后续 N 段
+    prefetchAround(endIdx, epochAtPlay);
+  }
+
+  // 预合成：从 startIdx 起，按并发数填充后续段的合成缓存
+  function prefetchAround(startIdx, epoch) {
+    const sentences = $$('.sentence');
+    if (!sentences.length) return;
+    const n = Math.max(1, parseInt(state.settings.ttsParagraphsPerRequest, 10) || 2);
+    const m = Math.max(1, parseInt(state.settings.ttsMaxCharsPerRequest, 10) || 120);
+    const maxConc = Math.max(1, parseInt(state.settings.ttsPrefetchConcurrency, 10) || 2);
+    const prefetchSet = tts.scheduler.prefetchSet;
+    const myEpoch = epoch != null ? epoch : tts.scheduler.chapterEpoch;
+
+    let idx = startIdx;
+    while (idx < sentences.length) {
+      while (idx < sentences.length && prefetchSet.has(idx)) idx++;
+      if (idx >= sentences.length) break;
+      if (tts.scheduler.prefetchInflight >= maxConc) break;
+
+      const seg = buildSegment(sentences, idx, n, m);
+      if (seg.items.length === 0) break;
+
+      const segStart = seg.items[0].idx;
+      const segEnd = seg.endIdx;
+      prefetchSet.add(segStart);
+      tts.scheduler.prefetchInflight++;
+
+      const joinedText = concatSegmentText(seg.items);
+      const filteredText = filterTtsText(joinedText);
+      const prefix = currentChapterCachePrefix();
+      const key = `${prefix}|s${segStart}|e${segEnd}|t${hashText(filteredText)}`;
+
+      (async () => {
+        try {
+          const cached = await cacheGet(key);
+          if (myEpoch !== tts.scheduler.chapterEpoch) return;
+          if (cached) return; // 已被其它路径缓存
+          const { base64, format } = await callMimoTTS(filteredText);
+          if (myEpoch !== tts.scheduler.chapterEpoch) return;
+          const mime = format === 'pcm16' ? 'audio/pcm' : 'audio/' + (format || 'wav');
+          const blob = base64ToBlob(base64, mime);
+          await cachePut(key, blob, format, { startIdx: segStart, endIdx: segEnd, chars: filteredText.length });
+        } catch (e) {
+          console.warn('[ttsCache] prefetch failed at', segStart, e);
+        } finally {
+          tts.scheduler.prefetchInflight--;
+          // 当前任务释放后，继续往后填（保持并发数填满）
+          if (myEpoch === tts.scheduler.chapterEpoch) {
+            prefetchAround(segEnd, myEpoch);
+          }
+        }
+      })();
+
+      idx = segEnd;
+    }
+  }
+
+  // 入口：从 idx 开始播（兼容旧 API：保留函数名 playSentence）
   async function playSentence(idx) {
     if (!state.currentBook) return;
     const sentences = $$('.sentence');
@@ -1793,40 +2233,30 @@
       showToast('本章已读完');
       return;
     }
+
+    // 章节内向前跳（用户点 prev/next），让旧预合成失效，避免回放时拿到过期的
+    const curStart = tts.scheduler.currentSegment?.startIdx ?? -1;
+    if (idx < curStart) {
+      tts.scheduler.chapterEpoch++;
+      tts.scheduler.prefetchSet.clear();
+    }
+
     tts.currentSentenceIdx = idx;
     tts.isLoading = true;
     updatePlayUI();
     highlightSentence(idx);
-    const text = sentences[idx].textContent.trim();
-    if (!text) {
-      // 跳过空句
-      return playSentence(idx + 1);
+
+    const n = Math.max(1, parseInt(state.settings.ttsParagraphsPerRequest, 10) || 2);
+    const m = Math.max(1, parseInt(state.settings.ttsMaxCharsPerRequest, 10) || 120);
+    const seg = buildSegment(sentences, idx, n, m);
+
+    if (seg.items.length === 0) {
+      // 没东西可合成（极端），跳过
+      return playSentence(seg.endIdx);
     }
+
     try {
-      const { base64, format } = await callMimoTTS(text);
-      const mime = format === 'pcm16' ? 'audio/pcm' : 'audio/' + (format || 'wav');
-      const blob = base64ToBlob(base64, mime);
-      if (tts.currentBlobUrl) URL.revokeObjectURL(tts.currentBlobUrl);
-      tts.currentBlobUrl = URL.createObjectURL(blob);
-      const audio = new Audio(tts.currentBlobUrl);
-      audio.playbackRate = parseFloat(state.settings.speed) || 1.0;
-      audio.onended = () => {
-        playSentence(idx + 1);
-      };
-      audio.onerror = () => {
-        showToast('音频播放失败');
-        stopTTS();
-      };
-      tts.audio = audio;
-      tts.isLoading = false;
-      tts.isPlaying = true;
-      updatePlayUI();
-      updateNowPlaying();
-      setupMediaSession(text);
-      try { await audio.play(); } catch (e) {
-        showToast('需要用户交互才能播放');
-        stopTTS();
-      }
+      await playSegment(seg.items, seg.items[0].idx, seg.endIdx);
     } catch (e) {
       console.error(e);
       showToast('TTS 失败：' + (e.message || '未知错误'));
@@ -1918,8 +2348,8 @@
     const total = $('#readerInner').scrollHeight - $('#readerContent').clientHeight;
     $('#readerContent').scrollTop = total * ratio;
   });
-
   // 触屏点击区
+  // 上下 = 跨章跳转，左右 = 章内翻屏，中 = 切换工具栏
   $('#tapLeft').addEventListener('click', () => {
     if (!state.currentBook) return;
     const c = $('#readerContent');
@@ -2076,12 +2506,23 @@
   // ===== 设置页 =====
   $('#settingsBack').addEventListener('click', () => switchPage('page-library'));
   function openSettings() { switchPage('page-settings'); }
+
+  // 同步"合成与缓存"5 个 UI 值（每次进入设置页时调用）
+  function syncTtsSettingsUI() {
+    $('#val_ttsParagraphsPerRequest').textContent = state.settings.ttsParagraphsPerRequest;
+    $('#val_ttsMaxCharsPerRequest').textContent = state.settings.ttsMaxCharsPerRequest;
+    $('#val_ttsCacheSizeMB').textContent = state.settings.ttsCacheSizeMB;
+    $('#val_ttsPrefetchConcurrency').textContent = state.settings.ttsPrefetchConcurrency;
+    $('#filterCharsPreview').textContent = state.settings.ttsFilterChars || '（无）';
+  }
+
   // 书架 Hero 标题长按 = 设置入口
   let heroTimer = null;
   $('#libTitle').addEventListener('touchstart', () => {
     heroTimer = setTimeout(() => {
       $('#apiKeyInput').value = getApiKey();
       $('#chapterPatternInput').value = state.settings.chapterPattern;
+      syncTtsSettingsUI();
       openSettings();
     }, 800);
   });
@@ -2095,8 +2536,53 @@
       state._libClick = 0;
       $('#apiKeyInput').value = getApiKey();
       $('#chapterPatternInput').value = state.settings.chapterPattern;
+      syncTtsSettingsUI();
       openSettings();
     }
+  });
+
+  // ===== 合成与缓存：5 个 +/- stepper =====
+  const TTS_STEP_RULES = {
+    ttsParagraphsPerRequest:   { min: 1,  max: 10 },
+    ttsMaxCharsPerRequest:     { min: 10, max: 1000 },
+    ttsCacheSizeMB:            { min: 50, max: 5000 },
+    ttsPrefetchConcurrency:    { min: 1,  max: 5 },
+  };
+  $$('.step-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.stepKey;
+      const delta = parseInt(btn.dataset.delta, 10);
+      const rule = TTS_STEP_RULES[key];
+      if (!rule) return;
+      const cur = parseInt(state.settings[key], 10) || 0;
+      const next = Math.max(rule.min, Math.min(rule.max, cur + delta));
+      if (next === cur) return;
+      state.settings[key] = next;
+      saveSettings();
+      syncTtsSettingsUI();
+      // 改完缓存上限时，异步清理一次（让用户立即生效）
+      if (key === 'ttsCacheSizeMB') pruneCacheIfNeeded().catch(() => {});
+    });
+  });
+
+  // ===== 过滤字符编辑弹窗 =====
+  $('#filterCharsRow').addEventListener('click', () => {
+    $('#filterCharsInput').value = state.settings.ttsFilterChars || '';
+    $('#filterCharsModal').classList.add('show');
+  });
+  $('#filterCharsCancel').addEventListener('click', () => $('#filterCharsModal').classList.remove('show'));
+  $('#filterCharsConfirm').addEventListener('click', () => {
+    state.settings.ttsFilterChars = $('#filterCharsInput').value;
+    saveSettings();
+    $('#filterCharsModal').classList.remove('show');
+    syncTtsSettingsUI();
+    showToast('已保存');
+  });
+
+  // ===== 清空音频缓存 =====
+  $('#clearTtsCacheBtn').addEventListener('click', async () => {
+    await cacheClear();
+    showToast('音频缓存已清空');
   });
 
   $('#saveApiKeyBtn').addEventListener('click', () => {
