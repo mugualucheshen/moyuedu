@@ -1214,15 +1214,49 @@
     setTimeout(() => t.remove(), dur);
   }
   function detectCharset(buf) {
+    // 1) BOM 检测
     if (buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) return 'utf-8';
     if (buf.length >= 2 && buf[0] === 0xFF && buf[1] === 0xFE) return 'utf-16le';
     if (buf.length >= 2 && buf[0] === 0xFE && buf[1] === 0xFF) return 'utf-16be';
-    let ascii = 0, nonAscii = 0;
-    for (let i = 0; i < Math.min(buf.length, 4096); i++) {
-      const b = buf[i];
-      if (b < 0x80) ascii++; else nonAscii++;
+
+    // 2) 无 BOM：用严格 UTF-8 试探 + CJK 比例判定
+    // 旧启发式 nonAscii*2>ascii 对 UTF-8 中文误判（每汉字 3 字节会让非 ASCII 远超 ASCII），
+    // 导致无 BOM 的 UTF-8 文件被当成 GBK 解码 → 乱码。
+    // 修复思路：先按 strict 模式解 UTF-8，能解出中文 → UTF-8；解不出但 GBK strict 通过 → GBK。
+    const sample = buf.subarray(0, Math.min(buf.length, 65536));
+    let utf8Text = null;
+    try {
+      utf8Text = new TextDecoder('utf-8', { fatal: true }).decode(sample);
+    } catch {
+      // 严格 UTF-8 失败：大概率是 GBK/GB18030，再试一下确认
+      try {
+        new TextDecoder('gbk', { fatal: true }).decode(sample);
+        return 'gbk';
+      } catch {
+        return 'utf-8'; // 都失败，保守默认
+      }
     }
-    return nonAscii * 2 > ascii ? 'gbk' : 'utf-8';
+
+    // 严格 UTF-8 解码成功。看解码结果是不是中文（CJK Unified Ideographs）
+    let cjk = 0, total = 0;
+    for (const ch of utf8Text) {
+      const cp = ch.codePointAt(0);
+      if (cp >= 0x4E00 && cp <= 0x9FFF) cjk++;
+      total++;
+    }
+    if (total > 0 && cjk / total > 0.3) return 'utf-8';
+
+    // CJK 比例不高 → 不是 UTF-8 中文。看非 ASCII 字节占比
+    // （如果实际是 GBK 中文，UTF-8 strict 解出来的字符几乎都不是汉字（CJK=0），
+    //   但字节里非 ASCII 比例会很高 → 指向 GBK）
+    let ascii = 0;
+    for (let i = 0; i < sample.length; i++) {
+      if (sample[i] < 0x80) ascii++;
+    }
+    const nonAsciiRatio = 1 - ascii / sample.length;
+    if (nonAsciiRatio > 0.3) return 'gbk';
+
+    return 'utf-8';
   }
   function decodeBuffer(buf) {
     const cs = detectCharset(buf);
@@ -1582,7 +1616,9 @@
     const title = ($('#uploadTitle').value || uploadFile.name.replace(/\.txt$/i, '')).trim();
     const author = $('#uploadAuthor').value.trim();
     try {
-      const buf = await uploadFile.arrayBuffer();
+      // Blob.arrayBuffer() 返回 ArrayBuffer，没有 .subarray() / .length / [i]；
+      // 包一层 Uint8Array，detectCharset 才能字节级扫描 BOM 和 CJK 比例。
+      const buf = new Uint8Array(await uploadFile.arrayBuffer());
       const text = decodeBuffer(buf);
       const id = uid();
       const meta = {

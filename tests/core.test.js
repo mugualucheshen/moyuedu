@@ -70,9 +70,39 @@ function base64ToBlob(b64, mime = 'audio/mp3') {
 
 // 4. 编码检测
 function detectCharset(buf) {
+  // 1) BOM 检测
   if (buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) return 'utf-8';
   if (buf.length >= 2 && buf[0] === 0xFF && buf[1] === 0xFE) return 'utf-16le';
   if (buf.length >= 2 && buf[0] === 0xFE && buf[1] === 0xFF) return 'utf-16be';
+
+  // 2) 无 BOM：用严格 UTF-8 试探 + CJK 比例判定
+  // 旧启发式 nonAscii*2>ascii 对 UTF-8 中文误判（每汉字 3 字节让非 ASCII >> ASCII），
+  // 导致无 BOM 的 UTF-8 文件被当成 GBK 解码 → 乱码。
+  const sample = buf.subarray(0, Math.min(buf.length, 65536));
+  let utf8Text = null;
+  try {
+    utf8Text = new TextDecoder('utf-8', { fatal: true }).decode(sample);
+  } catch {
+    try {
+      new TextDecoder('gbk', { fatal: true }).decode(sample);
+      return 'gbk';
+    } catch {
+      return 'utf-8';
+    }
+  }
+  let cjk = 0, total = 0;
+  for (const ch of utf8Text) {
+    const cp = ch.codePointAt(0);
+    if (cp >= 0x4E00 && cp <= 0x9FFF) cjk++;
+    total++;
+  }
+  if (total > 0 && cjk / total > 0.3) return 'utf-8';
+  let ascii = 0;
+  for (let i = 0; i < sample.length; i++) {
+    if (sample[i] < 0x80) ascii++;
+  }
+  const nonAsciiRatio = 1 - ascii / sample.length;
+  if (nonAsciiRatio > 0.3) return 'gbk';
   return 'utf-8';
 }
 
@@ -118,12 +148,59 @@ const expect = (name, actual, expected) => {
 
 // T5: 编码检测
 {
-  // UTF-8 BOM
   const utf8BOM = new Uint8Array([0xEF, 0xBB, 0xBF, 0xE4, 0xB8, 0xAD]);
   expect('T5.1 UTF-8 BOM 识别', detectCharset(utf8BOM), 'utf-8');
-  // UTF-16 LE BOM
   const utf16le = new Uint8Array([0xFF, 0xFE, 0x2D, 0x4E]);
   expect('T5.2 UTF-16LE 识别', detectCharset(utf16le), 'utf-16le');
+  const utf16be = new Uint8Array([0xFE, 0xFF, 0x4E, 0x2D]);
+  expect('T5.3 UTF-16BE 识别', detectCharset(utf16be), 'utf-16be');
+
+  // UTF-8 无 BOM：中文（之前会被误判为 GBK 的核心场景）
+  const utf8NoBOM = new Uint8Array(Buffer.from('第一章 出山\n\n主角走出山门，踏上江湖。\n', 'utf-8'));
+  expect('T5.4 UTF-8 无 BOM 中文', detectCharset(utf8NoBOM), 'utf-8');
+  // 验证解码后是中文（不是乱码）
+  const utf8Decoded = new TextDecoder('utf-8').decode(utf8NoBOM);
+  expect('T5.5 UTF-8 无 BOM 解码正确', utf8Decoded.includes('第一章') && utf8Decoded.includes('江湖'), true);
+
+  // GBK 无 BOM：中文（"你好世界" 的 GBK 字节是 C4 E3 BA C3 CA C0 BD E7）
+  const gbkNoBOM = new Uint8Array([0xC4, 0xE3, 0xBA, 0xC3, 0xCA, 0xC0, 0xBD, 0xE7]);
+  expect('T5.6 GBK 无 BOM 识别', detectCharset(gbkNoBOM), 'gbk');
+  // 验证 GBK 解码后是中文
+  const gbkDecoded = new TextDecoder('gbk').decode(gbkNoBOM);
+  expect('T5.7 GBK 解码正确', gbkDecoded, '你好世界');
+
+  // GBK 长文本（防短文本启发式不稳定）。手写 GBK 字节避免依赖 iconv：
+  //   "墨阅读 · 你的私人 TXT 书架\n\n第一章 出山\n主角走出山门，踏上江湖。\n"
+  const gbkLong = new Uint8Array([
+    0xC4, 0xA4, 0xD2, 0xC1, 0xCB, 0xC4,           // 墨阅读
+    0xA1, 0xA7,                                  // ·
+    0xC4, 0xE3, 0xBA, 0xC3,                       // 你好
+    0xB5, 0xC4,                                  // 的
+    0xCB, 0xBF, 0xC8, 0xCB,                       // 私人
+    0x20,                                         // (空格)
+    0x54, 0x58, 0x54,                             // TXT
+    0x20,                                         // (空格)
+    0xCA, 0xD5, 0xBC, 0xDB,                       // 书架
+    0x0A, 0x0A,                                   // \n\n
+    0xB5, 0xDA, 0xD2, 0xBB, 0xD6, 0xAE,           // 第一章
+    0x20, 0xB3, 0xF6, 0xC9, 0xBD,                 //  出山
+    0x0A,                                         // \n
+    0xD6, 0xF7, 0xBD, 0xE7, 0xD7, 0xB3, 0xC9, 0xCF, // 主角走出山
+    0xA3, 0xAC,                                  // ，
+    0xCC, 0xE1, 0xC9, 0xCF,                       // 踏上
+    0xBD, 0xAD, 0xBA, 0xFE,                       // 江湖
+    0xA1, 0xA3,                                  // 。
+    0x0A,                                         // \n
+  ]);
+  expect('T5.8 GBK 长文本识别', detectCharset(gbkLong), 'gbk');
+
+  // 纯 ASCII
+  const asciiBuf = new Uint8Array(Buffer.from('Hello, world! This is plain ASCII.', 'utf-8'));
+  expect('T5.10 纯 ASCII 识别', detectCharset(asciiBuf), 'utf-8');
+
+  // 端到端：模拟乱码文件 → 解码修复（之前会返回 'gbk'，现在正确返回 'utf-8'）
+  // 这是用户报告的核心场景
+  expect('T5.11 回归测试：UTF-8 中文不返回 gbk', detectCharset(utf8NoBOM) !== 'gbk', true);
 }
 
 // T6: 自定义章节规则 - 用"卷"识别
