@@ -415,17 +415,6 @@
     }
     .bb-fab:active { transform: scale(0.92); }
     .bb-fab svg { width: 28px; height: 28px; stroke: #fff; fill: none; stroke-width: 2.4; }
-    .bb-fab::after {
-      content: '';
-      position: absolute;
-      bottom: -8px; left: 50%;
-      transform: translateX(-50%);
-      width: 36px; height: 4px;
-      background: var(--accent);
-      border-radius: 2px;
-      opacity: 0;
-      transition: opacity 0.2s;
-    }
 
     /* ====== 暗色模式适配 ====== */
     [data-theme="dark"] .book-card .fav-btn { background: rgba(40, 30, 25, 0.6); }
