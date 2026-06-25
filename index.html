@@ -1496,6 +1496,19 @@
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     return new Blob([bytes], { type: mime });
   }
+  // blob → base64 字符串（用 FileReader.readAsDataURL，大 blob 不会栈溢出）
+  function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const s = String(reader.result);
+        const comma = s.indexOf(',');
+        resolve(comma >= 0 ? s.slice(comma + 1) : s);
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  }
   function escapeHTML(s) {
     return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
@@ -2133,7 +2146,6 @@
     audio: null,
     isPlaying: false,
     isLoading: false,
-    currentBlobUrl: null,
     currentSentenceIdx: 0,
     // === v1.1 段级调度状态 ===
     scheduler: {
@@ -2150,10 +2162,7 @@
       try { tts.audio.pause(); } catch {}
       tts.audio = null;
     }
-    if (tts.currentBlobUrl) {
-      URL.revokeObjectURL(tts.currentBlobUrl);
-      tts.currentBlobUrl = null;
-    }
+    // 不再 revoke Blob URL：base64 data URL 方案下没有 Blob URL，无须清理
     tts.isPlaying = false;
     tts.isLoading = false;
     // v1.1：让所有在飞的预合成任务识别后退出
@@ -2273,22 +2282,33 @@
     const key = `${prefix}|s${startIdx}|e${endIdx}|t${hashText(filteredText)}`;
 
     // 缓存查询
-    let blob, format = 'wav';
+    let audioBase64, format = 'wav';
     const cached = await cacheGet(key);
     if (cached) {
-      blob = cached.blob;
       format = cached.format || 'wav';
+      audioBase64 = cached.audioBase64;
+      if (!audioBase64 && cached.blob) {
+        // 旧缓存（v1.1 blob only）— 现场转一次 base64
+        audioBase64 = await blobToBase64(cached.blob);
+      }
     } else {
       const { base64, format: fmt } = await callMimoTTS(filteredText);
+      audioBase64 = base64;
       format = fmt || 'wav';
       const mime = format === 'pcm16' ? 'audio/pcm' : 'audio/' + format;
-      blob = base64ToBlob(base64, mime);
-      // 写缓存（异步，失败不影响播放）
-      cachePut(key, blob, format, { startIdx, endIdx, chars: filteredText.length });
+      const blob = base64ToBlob(audioBase64, mime);
+      // 写缓存（blob 用于后续可能的导出 / 旧兼容，audioBase64 用于直接 data URL 播放）
+      cachePut(key, blob, format, {
+        startIdx, endIdx,
+        chars: filteredText.length,
+        audioBase64, // 新增字段
+      });
     }
 
-    if (tts.currentBlobUrl) URL.revokeObjectURL(tts.currentBlobUrl);
-    tts.currentBlobUrl = URL.createObjectURL(blob);
+    // iOS Safari fix：用 base64 data URL 播放，避开 Blob URL 在 iOS WebKit 的
+    // decoder 池 race（连续 createObjectURL 会让 TTS#1+ code=4 SRC_NOT_SUPPORTED）
+    const mime = format === 'pcm16' ? 'audio/pcm' : 'audio/' + format;
+    const audioSrc = `data:${mime};base64,${audioBase64}`;
 
     // 段内字符偏移表（用于 timeupdate 高亮）
     const offsets = [0];
@@ -2303,7 +2323,7 @@
     tts.scheduler.totalChars = offsets[offsets.length - 1] || 1;
     tts.scheduler.currentSegment = { items, startIdx, endIdx };
 
-    const audio = new Audio(tts.currentBlobUrl);
+    const audio = new Audio(audioSrc);
     audio.playbackRate = parseFloat(state.settings.speed) || 1.0;
 
     const epochAtPlay = tts.scheduler.chapterEpoch;
@@ -2396,7 +2416,11 @@
           if (myEpoch !== tts.scheduler.chapterEpoch) return;
           const mime = format === 'pcm16' ? 'audio/pcm' : 'audio/' + (format || 'wav');
           const blob = base64ToBlob(base64, mime);
-          await cachePut(key, blob, format, { startIdx: segStart, endIdx: segEnd, chars: filteredText.length });
+          await cachePut(key, blob, format, {
+            startIdx: segStart, endIdx: segEnd,
+            chars: filteredText.length,
+            audioBase64: base64, // 新增：直接存 base64 供后续 data URL 播放
+          });
         } catch (e) {
           console.warn('[ttsCache] prefetch failed at', segStart, e);
         } finally {
