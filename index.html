@@ -1532,7 +1532,7 @@
     const input = $('#apiKeyInput');
     const btn = $('#saveApiKeyBtn');
     if (hasKey) {
-      input.value = '*****';
+      input.value = '*'.repeat(18);
       input.readOnly = true;
       btn.textContent = '编辑 Key';
     } else {
@@ -2977,6 +2977,8 @@
     renderHome();
     renderLibrary(); // 书架预渲染（虽然默认隐藏，但切换时能秒出）
     syncApiKeyUI();   // 设置页 Key 状态同步（已保存则显示 ***** + 编辑按钮）
+    // 章节识别关键词：默认值明文填入，避免 placeholder 被误认为已配置
+    $('#chapterPatternInput').value = state.settings.chapterPattern || DEFAULT_SETTINGS.chapterPattern;
     checkFirstRun();
   }
   init();
