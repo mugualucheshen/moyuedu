@@ -673,6 +673,37 @@
     .font-chip[data-font="kai"]    { font-family: var(--font-kai); }
     .font-chip[data-font="fang"]   { font-family: var(--font-fang); }
     .font-chip[data-font="system"] { font-family: -apple-system, sans-serif; }
+
+    /* iOS fallback：iPhone 没有真楷体/仿宋，用苹方变体 + 粗细/字距模拟"楷体感"/"仿宋感" */
+    .ios .font-chip[data-font="kai"] {
+      font-family: "PingFang SC", "Hiragino Sans GB", sans-serif;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+    }
+    .ios .font-chip[data-font="fang"] {
+      font-family: "PingFang SC", "Hiragino Sans GB", sans-serif;
+      font-weight: 300;
+      letter-spacing: 0.02em;
+    }
+    .ios .reader-inner.kai-fallback {
+      font-family: "PingFang SC", sans-serif;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+    }
+    .ios .reader-inner.fang-fallback {
+      font-family: "PingFang SC", sans-serif;
+      font-weight: 300;
+      letter-spacing: 0.02em;
+    }
+    /* iOS 上楷体/仿宋 chip 加个角标提示"模拟" */
+    .ios .font-chip[data-font="kai"]::after,
+    .ios .font-chip[data-font="fang"]::after {
+      content: '·';
+      font-size: 8px;
+      color: var(--text-tertiary);
+      margin-left: 2px;
+      vertical-align: super;
+    }
     .slider-row { display: flex; align-items: center; gap: 14px; }
     .slider-row input[type=range] {
       flex: 1; -webkit-appearance: none; height: 4px;
@@ -1889,6 +1920,10 @@
     document.documentElement.style.setProperty('--reader-line-height', state.settings.lineHeight);
   }
 
+  // iOS Safari 检测（iOS 没有真楷体/仿宋内置字体，chip 显示需要 fallback 处理）
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                 (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
   // 字体预设 → CSS 变量名映射
   const FONT_FAMILY_MAP = {
     serif:  '--font-serif',
@@ -1897,16 +1932,34 @@
     fang:   '--font-fang',
     system: '',   // 系统默认：直接用 -apple-system, sans-serif
   };
+
+  // iOS 上"楷体"用苹方 + 稍重 + 稍宽 letter-spacing 模拟"楷体感"
+  // iOS 上"仿宋"用苹方 Light + 细 + 紧 letter-spacing 模拟"仿宋感"
+  // 这不是真楷体/仿宋（iOS 没装），但视觉上能让 chip 区分开
+  const IOS_FONT_FALLBACK = {
+    kai:  '"PingFang SC", "Hiragino Sans GB", -apple-system, sans-serif',
+    fang: '"PingFang SC", "Hiragino Sans GB", -apple-system, sans-serif',
+  };
+
   function applyReaderFontFamily() {
     const v = state.settings.fontFamily || 'serif';
-    const varName = FONT_FAMILY_MAP[v];
+    let familyValue = '';
     if (v === 'system') {
-      document.documentElement.style.setProperty('--reader-font-family',
-        '-apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", sans-serif');
-    } else if (varName) {
-      const cur = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
-      document.documentElement.style.setProperty('--reader-font-family', cur);
+      familyValue = '-apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", sans-serif';
+    } else if (isIOS && (v === 'kai' || v === 'fang')) {
+      // iOS fallback：用苹方变体（视觉上区分楷/仿宋，不靠真字体）
+      familyValue = IOS_FONT_FALLBACK[v];
+    } else {
+      const varName = FONT_FAMILY_MAP[v];
+      if (varName) {
+        familyValue = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+      }
     }
+    if (familyValue) {
+      document.documentElement.style.setProperty('--reader-font-family', familyValue);
+    }
+    // 同时切换 iOS 标志（CSS 用这个给楷体/仿宋 chip 应用 letter-spacing / font-weight）
+    document.documentElement.classList.toggle('ios', isIOS);
   }
   function applyReaderPadding() {
     document.documentElement.style.setProperty('--reader-padding-left', state.settings.readerPaddingLeft + 'px');
@@ -2903,9 +2956,20 @@
       $$('.font-chip').forEach(x => x.classList.remove('active'));
       c.classList.add('active');
       applyReaderFontFamily();
+      updateReaderInnerFontClass();
       saveSettings();
     });
   });
+
+  // 给 .reader-inner 加 iOS fallback class（楷体/仿宋在 iOS 上走苹方变体）
+  function updateReaderInnerFontClass() {
+    const inner = $('#readerInner');
+    if (!inner) return;
+    inner.classList.remove('kai-fallback', 'fang-fallback');
+    if (isIOS && (state.settings.fontFamily === 'kai' || state.settings.fontFamily === 'fang')) {
+      inner.classList.add(state.settings.fontFamily + '-fallback');
+    }
+  }
   $('#fontSizeSlider').addEventListener('input', e => {
     state.settings.fontSize = parseInt(e.target.value, 10);
     $('#fontSizeVal').textContent = e.target.value;
@@ -3106,6 +3170,7 @@
     applyReaderSettings();
     applyReaderFontFamily();
     applyReaderPadding();
+    updateReaderInnerFontClass();
     currentTabPage = 'page-home';
     renderHome();
     renderLibrary(); // 书架预渲染（虽然默认隐藏，但切换时能秒出）
