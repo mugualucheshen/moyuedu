@@ -310,22 +310,127 @@
     }
     .empty-state p { font-size: 13px; margin: 0; }
 
-    /* FAB 浮动添加按钮 */
-    .fab {
-      position: fixed;
-      right: max(20px, env(safe-area-inset-right));
-      bottom: calc(24px + var(--safe-bottom));
-      width: 56px; height: 56px;
+    /* ====== 收藏角标 (Favorite Badge) ====== */
+    .book-card .fav-btn {
+      position: absolute; top: 6px; right: 6px;
+      width: 28px; height: 28px;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(255, 255, 255, 0.75);
       border-radius: 50%;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      z-index: 2;
+      transition: transform 0.15s, background 0.15s;
+    }
+    .book-card .fav-btn:active { transform: scale(0.85); }
+    .book-card .fav-btn svg { width: 16px; height: 16px; stroke: #5c5249; fill: none; stroke-width: 2; transition: all 0.2s; }
+    .book-card .fav-btn.on svg { stroke: #c0392b; fill: #e74c3c; }
+    .book-card.editing .fav-btn { display: none; }
+
+    /* ====== 首页 Tab 切换 (Home Tabs) ====== */
+    .home-tabs {
+      display: flex;
+      gap: 6px;
+      padding: 8px 16px 12px;
+      background: var(--bg);
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      border-bottom: 0.5px solid var(--border);
+    }
+    .home-tab {
+      flex: 1;
+      padding: 8px 12px;
+      border-radius: var(--radius-pill);
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 500;
+      border: 0.5px solid var(--border);
+      transition: all 0.2s;
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      cursor: pointer;
+    }
+    .home-tab .count {
+      font-size: 11px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      padding: 1px 6px;
+      border-radius: var(--radius-pill);
+      min-width: 18px;
+    }
+    .home-tab.active {
       background: var(--accent);
       color: #fff;
-      box-shadow: var(--shadow-lg);
-      display: inline-flex; align-items: center; justify-content: center;
-      z-index: 20;
+      border-color: var(--accent);
+      box-shadow: var(--shadow-sm);
+    }
+    .home-tab.active .count { background: rgba(255,255,255,0.25); color: #fff; }
+    .home-tab:active { transform: scale(0.96); }
+
+    /* ====== 底部导航栏 (Bottom Bar) ====== */
+    .bottom-bar {
+      position: fixed;
+      left: 0; right: 0; bottom: 0;
+      padding-bottom: var(--safe-bottom);
+      background: var(--bg-overlay);
+      backdrop-filter: saturate(180%) blur(24px);
+      -webkit-backdrop-filter: saturate(180%) blur(24px);
+      border-top: 0.5px solid var(--border);
+      z-index: 25;
+      display: grid;
+      grid-template-columns: 1fr 1fr 80px 1fr 1fr;
+      align-items: center;
+      height: calc(60px + var(--safe-bottom));
+      transition: transform 0.3s ease;
+    }
+    .bottom-bar.hidden { transform: translateY(110%); }
+
+    .bb-item {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 2px;
+      color: var(--text-tertiary);
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      height: 100%;
+    }
+    .bb-item:active { opacity: 0.6; }
+    .bb-item svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 2; transition: color 0.2s; }
+    .bb-item .label { font-size: 10px; letter-spacing: 0.5px; transition: color 0.2s; }
+    .bb-item.active { color: var(--accent); }
+    .bb-item.active svg { stroke: var(--accent); }
+
+    /* 中间凸起的 + 按钮 */
+    .bb-fab {
+      position: relative;
+      width: 56px; height: 56px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent), #b8392b);
+      color: #fff;
+      box-shadow: 0 6px 18px rgba(139, 44, 31, 0.35), var(--shadow-md);
+      display: flex; align-items: center; justify-content: center;
+      margin: -22px auto 0;
       transition: transform 0.15s;
     }
-    .fab:active { transform: scale(0.92); }
-    .fab svg { width: 26px; height: 26px; stroke: currentColor; fill: none; stroke-width: 2.2; }
+    .bb-fab:active { transform: scale(0.92); }
+    .bb-fab svg { width: 28px; height: 28px; stroke: #fff; fill: none; stroke-width: 2.4; }
+    .bb-fab::after {
+      content: '';
+      position: absolute;
+      bottom: -8px; left: 50%;
+      transform: translateX(-50%);
+      width: 36px; height: 4px;
+      background: var(--accent);
+      border-radius: 2px;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+
+    /* ====== 暗色模式适配 ====== */
+    [data-theme="dark"] .book-card .fav-btn { background: rgba(40, 30, 25, 0.6); }
+    [data-theme="dark"] .book-card .fav-btn svg { stroke: var(--text-secondary); }
+    [data-theme="dark"] .home-tab .count { background: rgba(139, 44, 31, 0.2); }
 
     /* =========================================================
        阅读器 (Reader)
@@ -716,7 +821,7 @@
 <body>
   <div id="app">
     <!-- ================= 书架页 ================= -->
-    <section class="page active" id="page-library">
+    <section class="page" id="page-library">
       <div class="page-scroll">
         <div class="library-hero">
           <h1 id="libTitle">墨阅读</h1>
@@ -742,9 +847,36 @@
           <p>点击右下角按钮，添加你的第一本小说</p>
         </div>
       </div>
-      <button class="fab" id="fabAdd" aria-label="添加书籍">
-        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-      </button>
+    </section>
+
+    <!-- ================= 首页 (page-home) ================= -->
+    <section class="page active" id="page-home">
+      <div class="page-scroll">
+        <div class="library-hero">
+          <h1 id="homeTitle">墨阅读</h1>
+          <div class="subtitle" id="homeSubtitle">你的私人阅读空间</div>
+        </div>
+        <div class="home-tabs">
+          <button class="home-tab active" data-home-tab="recent">
+            <span>最近阅读</span><span class="count" id="homeCountRecent">0</span>
+          </button>
+          <button class="home-tab" data-home-tab="favorite">
+            <span>收藏</span><span class="count" id="homeCountFavorite">0</span>
+          </button>
+          <button class="home-tab" data-home-tab="finished">
+            <span>已读完</span><span class="count" id="homeCountFinished">0</span>
+          </button>
+        </div>
+        <div class="book-grid" id="homeGrid"></div>
+        <div class="empty-state" id="homeEmpty" style="display:none">
+          <svg class="icon" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M12 8h28a4 4 0 0 1 4 4v44l-4-3-4 3-4-3-4 3-4-3-4 3-4-3-4 3V12a4 4 0 0 1 4-4z"/>
+            <path d="M20 20h16M20 28h16M20 36h10"/>
+          </svg>
+          <h3 id="homeEmptyTitle">暂无内容</h3>
+          <p id="homeEmptyHint">先去书架添加一本书吧</p>
+        </div>
+      </div>
     </section>
 
     <!-- ================= 阅读器页 ================= -->
@@ -909,6 +1041,29 @@
       </div>
     </section>
   </div>
+
+  <!-- ================= 底部导航栏 (Bottom Bar) ================= -->
+  <nav class="bottom-bar" id="bottomBar">
+    <div class="bb-item active" data-page="page-home">
+      <svg viewBox="0 0 24 24"><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
+      <span class="label">首页</span>
+    </div>
+    <div class="bb-item" data-page="page-library">
+      <svg viewBox="0 0 24 24"><path d="M4 5h3v14H4zM10 5h3v14h-3z"/><path d="M16 5h4l-2 14h-4z"/></svg>
+      <span class="label">书架</span>
+    </div>
+    <div class="bb-fab" id="bbFab" aria-label="添加书籍">
+      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+    </div>
+    <div class="bb-item" id="bbWrite">
+      <svg viewBox="0 0 24 24"><path d="M14 4 4 14v6h6L20 10z"/><path d="m13 5 6 6"/></svg>
+      <span class="label">写书</span>
+    </div>
+    <div class="bb-item" data-page="page-settings">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      <span class="label">设置</span>
+    </div>
+  </nav>
 
   <!-- 章节抽屉 -->
   <div class="drawer" id="tocDrawer">
@@ -1456,10 +1611,14 @@
     grid.innerHTML = list.map(b => {
       const prog = Math.round((b.progress || 0) * 100);
       const firstChar = b.title.replace(/\s/g, '').charAt(0) || '墨';
+      const isFav = !!b.favorite;
       return `
         <div class="book-card ${state.editingLibrary ? 'editing' : ''}" data-id="${b.id}">
           <button class="delete-btn" data-id="${b.id}" aria-label="删除">
             <svg viewBox="0 0 24 24"><path d="M6 6 18 18M18 6 6 18"/></svg>
+          </button>
+          <button class="fav-btn ${isFav ? 'on' : ''}" data-id="${b.id}" aria-label="收藏">
+            <svg viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21l7.8-7.5 1-1.1a5.5 5.5 0 0 0 0-7.8z"/></svg>
           </button>
           <div class="book-cover">
             <div class="book-cover-fallback">${escapeHTML(b.title)}</div>
@@ -1485,6 +1644,7 @@
       const id = el.dataset.id;
       el.addEventListener('click', (e) => {
         if (e.target.closest('.delete-btn')) return;
+        if (e.target.closest('.fav-btn')) return;
         if (state.editingLibrary) return;
         openBook(id);
       });
@@ -1494,6 +1654,12 @@
         e.stopPropagation();
         const id = el.dataset.id;
         askDelete(id);
+      });
+    });
+    grid.querySelectorAll('.fav-btn').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleFavorite(el.dataset.id);
       });
     });
   }
@@ -1650,12 +1816,25 @@
   }
 
   // ===== 页面切换 =====
+  let currentTabPage = 'page-home';
   function switchPage(id) {
     $$('.page').forEach(p => p.classList.remove('active'));
     $('#' + id).classList.add('active');
+    // 底部 bar 显隐：阅读器内隐藏，其它页面显示
+    const bar = $('#bottomBar');
+    if (bar) {
+      if (id === 'page-reader') bar.classList.add('hidden');
+      else bar.classList.remove('hidden');
+    }
+    // 同步 bottom bar active 态（仅对在 bar 里的目标 page）
+    $$('.bb-item').forEach(b => b.classList.toggle('active', b.dataset.page === id));
+    // 记录 tab 页（供 settingsBack 返回）
+    if (id !== 'page-reader') currentTabPage = id;
     if (id === 'page-library') {
       stopTTS();
       renderLibrary();
+    } else if (id === 'page-home') {
+      renderHome();
     }
   }
 
@@ -1701,6 +1880,7 @@
         addedAt: Date.now(),
         lastReadAt: null,
         progress: 0,
+        favorite: false,
       };
       await dbPut(STORE_BOOKS, { id, text });
       state.books.push(meta);
@@ -2450,7 +2630,7 @@
     clearTimeout(pressTimer);
   });
   document.addEventListener('click', (e) => {
-    if (state.editingLibrary && !e.target.closest('.book-card') && !e.target.closest('.fab') && !e.target.closest('.sort-btn') && !e.target.closest('.search-box')) {
+    if (state.editingLibrary && !e.target.closest('.book-card') && !e.target.closest('.sort-btn') && !e.target.closest('.search-box')) {
       state.editingLibrary = false;
       renderLibrary();
     }
@@ -2471,8 +2651,132 @@
     renderLibrary();
   });
 
-  // 添加
-  $('#fabAdd').addEventListener('click', openUpload);
+  // ===== 底部导航栏 + 首页 =====
+  // 中间 + 按钮 = 打开上传弹层
+  $('#bbFab').addEventListener('click', openUpload);
+
+  // 4 个 tab 切换（排除写书，它单独处理）
+  $$('.bb-item').forEach(el => {
+    if (el.id === 'bbWrite') return;
+    el.addEventListener('click', () => switchPage(el.dataset.page));
+  });
+  // 写书：toast 提示（暂未实现）
+  $('#bbWrite').addEventListener('click', () => {
+    showToast('写作功能敬请期待 ✍️');
+  });
+
+  // ===== 首页三 tab 切换 + 渲染 =====
+  const HOME_TABS = ['recent', 'favorite', 'finished'];
+  let currentHomeTab = 'recent';
+  const HOME_EMPTY_HINTS = {
+    recent:    { title: '还没有阅读记录', hint: '去书架打开一本书开始阅读' },
+    favorite:  { title: '还没有收藏的书', hint: '在书架卡片右上角点 ❤️ 收藏' },
+    finished:  { title: '还没有读完的书', hint: '读到 95% 以上算读完哦' },
+  };
+
+  function getHomeBooks(tabKey) {
+    if (tabKey === 'recent') {
+      // 最近阅读：有 lastReadAt 的书，按时间倒序，最多 20
+      return state.books
+        .filter(b => b.lastReadAt)
+        .sort((a, b) => b.lastReadAt - a.lastReadAt)
+        .slice(0, 20);
+    }
+    if (tabKey === 'favorite') {
+      return state.books
+        .filter(b => b.favorite)
+        .sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+    }
+    if (tabKey === 'finished') {
+      return state.books
+        .filter(b => (b.progress || 0) >= 0.95)
+        .sort((a, b) => (b.lastReadAt || b.addedAt) - (a.lastReadAt || a.addedAt));
+    }
+    return [];
+  }
+
+  function renderHome() {
+    // 统计每个 tab 数量
+    $('#homeCountRecent').textContent   = getHomeBooks('recent').length;
+    $('#homeCountFavorite').textContent = getHomeBooks('favorite').length;
+    $('#homeCountFinished').textContent = getHomeBooks('finished').length;
+
+    const grid = $('#homeGrid');
+    const empty = $('#homeEmpty');
+    const list = getHomeBooks(currentHomeTab);
+
+    if (list.length === 0) {
+      grid.innerHTML = '';
+      empty.style.display = 'block';
+      const meta = HOME_EMPTY_HINTS[currentHomeTab];
+      $('#homeEmptyTitle').textContent = meta.title;
+      $('#homeEmptyHint').textContent = meta.hint;
+      return;
+    }
+    empty.style.display = 'none';
+    // 复用卡片渲染逻辑：临时把 #bookGrid 替换为 #homeGrid 用一份模板
+    grid.innerHTML = list.map(b => {
+      const prog = Math.round((b.progress || 0) * 100);
+      const isFav = !!b.favorite;
+      return `
+        <div class="book-card" data-id="${b.id}">
+          <button class="fav-btn ${isFav ? 'on' : ''}" data-id="${b.id}" aria-label="收藏">
+            <svg viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21l7.8-7.5 1-1.1a5.5 5.5 0 0 0 0-7.8z"/></svg>
+          </button>
+          <div class="book-cover">
+            <div class="book-cover-fallback">${escapeHTML(b.title)}</div>
+            <div class="book-progress"><div class="book-progress-bar" style="width:${prog}%"></div></div>
+          </div>
+          <div class="book-info">
+            <div class="book-title">${escapeHTML(b.title)}</div>
+            <div class="book-meta">
+              <span>${fmtWords(b.words || 0)}</span>
+              <span class="book-meta-dot"></span>
+              <span>${prog}%</span>
+              <span class="book-meta-dot"></span>
+              <span>${fmtTime(b.lastReadAt)}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // 卡片点击 = 进阅读器
+    grid.querySelectorAll('.book-card').forEach(el => {
+      const id = el.dataset.id;
+      el.addEventListener('click', (e) => {
+        if (e.target.closest('.fav-btn')) return;
+        openBook(id);
+      });
+    });
+    // 收藏按钮
+    grid.querySelectorAll('.fav-btn').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleFavorite(el.dataset.id);
+      });
+    });
+  }
+
+  function toggleFavorite(id) {
+    const b = state.books.find(x => x.id === id);
+    if (!b) return;
+    b.favorite = !b.favorite;
+    saveMeta();
+    // 同步刷新两个页面（用户可能从首页 / 书架切来切去）
+    renderLibrary();
+    renderHome();
+  }
+
+  // 首页 tab 点击
+  $$('.home-tab').forEach(el => {
+    el.addEventListener('click', () => {
+      currentHomeTab = el.dataset.homeTab;
+      $$('.home-tab').forEach(x => x.classList.toggle('active', x === el));
+      renderHome();
+    });
+  });
+
 
   // ===== 阅读器设置交互 =====
   $$('.theme-chip').forEach(c => {
@@ -2504,8 +2808,7 @@
   });
 
   // ===== 设置页 =====
-  $('#settingsBack').addEventListener('click', () => switchPage('page-library'));
-  function openSettings() { switchPage('page-settings'); }
+  $('#settingsBack').addEventListener('click', () => switchPage(currentTabPage));
 
   // 同步"合成与缓存"5 个 UI 值（每次进入设置页时调用）
   function syncTtsSettingsUI() {
@@ -2515,31 +2818,6 @@
     $('#val_ttsPrefetchConcurrency').textContent = state.settings.ttsPrefetchConcurrency;
     $('#filterCharsPreview').textContent = state.settings.ttsFilterChars || '（无）';
   }
-
-  // 书架 Hero 标题长按 = 设置入口
-  let heroTimer = null;
-  $('#libTitle').addEventListener('touchstart', () => {
-    heroTimer = setTimeout(() => {
-      $('#apiKeyInput').value = getApiKey();
-      $('#chapterPatternInput').value = state.settings.chapterPattern;
-      syncTtsSettingsUI();
-      openSettings();
-    }, 800);
-  });
-  $('#libTitle').addEventListener('touchend', () => clearTimeout(heroTimer));
-  $('#libTitle').addEventListener('click', () => {
-    // PC 端：5 次点击进入设置
-    state._libClick = (state._libClick || 0) + 1;
-    clearTimeout(state._libClickTimer);
-    state._libClickTimer = setTimeout(() => state._libClick = 0, 1500);
-    if (state._libClick >= 5) {
-      state._libClick = 0;
-      $('#apiKeyInput').value = getApiKey();
-      $('#chapterPatternInput').value = state.settings.chapterPattern;
-      syncTtsSettingsUI();
-      openSettings();
-    }
-  });
 
   // ===== 合成与缓存：5 个 +/- stepper =====
   const TTS_STEP_RULES = {
@@ -2674,7 +2952,9 @@
     loadMeta();
     applyTheme(state.settings.theme);
     applyReaderSettings();
-    renderLibrary();
+    currentTabPage = 'page-home';
+    renderHome();
+    renderLibrary(); // 书架预渲染（虽然默认隐藏，但切换时能秒出）
     checkFirstRun();
   }
   init();
