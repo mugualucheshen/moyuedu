@@ -1518,7 +1518,22 @@
     // 旧启发式 nonAscii*2>ascii 对 UTF-8 中文误判（每汉字 3 字节会让非 ASCII 远超 ASCII），
     // 导致无 BOM 的 UTF-8 文件被当成 GBK 解码 → 乱码。
     // 修复思路：先按 strict 模式解 UTF-8，能解出中文 → UTF-8；解不出但 GBK strict 通过 → GBK。
-    const sample = buf.subarray(0, Math.min(buf.length, 65536));
+
+    // [A] 采样边界保护：64KB 截断点可能正好切在 GBK 双字节字符中间
+    //   （lead byte 0x81-0xFE 后无 trail），GBK strict 解码会判定为非法序列。
+    //   修法：先按 64KB 采样试 GBK strict；如果失败且 sample 正好是 64KB 截断，
+    //   回退到 sample 末尾最近的 ASCII 字节（保证末尾不会是孤立 high byte）。
+    //   实测《女装春舍》（521KB GBK 文件）就在 65535 处踩中。
+    let sampleLen = Math.min(buf.length, 65536);
+    if (sampleLen === 65536 && buf.length > 65536) {
+      try {
+        new TextDecoder('gbk', { fatal: true }).decode(buf.subarray(0, sampleLen));
+      } catch {
+        while (sampleLen > 1 && buf[sampleLen - 1] >= 0x80) sampleLen -= 1;
+      }
+    }
+    const sample = buf.subarray(0, sampleLen);
+
     let utf8Text = null;
     try {
       utf8Text = new TextDecoder('utf-8', { fatal: true }).decode(sample);
@@ -1528,7 +1543,14 @@
         new TextDecoder('gbk', { fatal: true }).decode(sample);
         return 'gbk';
       } catch {
-        return 'utf-8'; // 都失败，保守默认
+        // [D] GBK strict 也失败：可能是 GB18030 扩展字符（GB18030 是 GBK 超集，
+        //     包含中日韩扩展及部分繁体），再试一次 GB18030 strict。
+        try {
+          new TextDecoder('gb18030', { fatal: true }).decode(sample);
+          return 'gb18030';
+        } catch {
+          return 'utf-8'; // 都失败，保守默认
+        }
       }
     }
 
