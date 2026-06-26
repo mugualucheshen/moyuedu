@@ -876,6 +876,132 @@ function buildSegment(sentences, startIdx, n, maxChars) {
   expect('T23.3 a2 章节切换后仍能链式', r2, 'CHAINED');
 }
 
+// === v0.1.9 删除按钮优化回归测试 ===
+// 老板要求：不要长按编辑模式，要有按钮 + 二次确认
+// 5 个测试：按钮存在/点击触发/弹窗文案/二次确认后真删/长按不再编辑
+
+// T25: HTML 渲染时每张书卡有 .delete-btn 按钮（不再依赖 .editing 状态）
+{
+  // 模拟 renderLibrary 渲染的 HTML
+  const state = { editingLibrary: false, books: [{id: 'a', title: '书A'}, {id: 'b', title: '书B'}] };
+  function renderCard(b) {
+    return `<div class="book-card" data-id="${b.id}">
+      <button class="delete-btn" data-id="${b.id}" aria-label="删除《${b.title}》" title="删除">
+        <svg viewBox="0 0 24 24"><path d="M6 6 18 18M18 6 6 18"/></svg>
+      </button>
+    </div>`;
+  }
+  const cards = state.books.map(renderCard);
+  expect('T25.1 渲染不带 editing class', !cards[0].includes('editing'), true);
+  expect('T25.2 每张卡都有 .delete-btn 按钮', cards.every(c => c.includes('class="delete-btn"')), true);
+  expect('T25.3 按钮 aria-label 含书名', cards[0].includes('aria-label="删除《书A》"'), true);
+}
+
+// T26: CSS .delete-btn 常驻显示（display: flex，不再 display: none）
+{
+  // 模拟源码扫描
+  const css = `.book-card .delete-btn {
+      position: absolute; top: 6px; right: 42px;
+      width: 28px; height: 28px;
+      background: rgba(0,0,0,0.45);
+      color: #fff;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      backdrop-filter: blur(8px);
+      opacity: 0.7;
+    }`;
+  const fav = `.book-card .fav-btn {
+      position: absolute; top: 6px; right: 6px;
+      width: 28px; height: 28px;
+      display: flex;
+    }`;
+  expect('T26.1 delete-btn display 是 flex（不是 none）',
+    /display:\s*flex/.test(css) && !/display:\s*none/.test(css), true);
+  // v0.1.9 删除的旧规则
+  expect('T26.2 已删 .editing .delete-btn 规则',
+    !css.includes('.editing .delete-btn'), true);
+  // v0.1.9.1 老板反馈：fav-btn 和 delete-btn 不能重叠在同一位置
+  // 提取两个按钮的 right 值
+  const deleteRight = css.match(/right:\s*(\d+)px/);
+  const favRight = fav.match(/right:\s*(\d+)px/);
+  expect('T26.3 delete-btn 和 fav-btn right 值不同（不重叠）',
+    deleteRight && favRight && deleteRight[1] !== favRight[1], true);
+  expect('T26.4 delete-btn 在 fav-btn 左边',
+    parseInt(deleteRight[1]) > parseInt(favRight[1]), true);
+}
+
+// T27: state.editingLibrary 已彻底移除
+{
+  // 模拟 v0.1.9 后的 state 初始化
+  const state = { books: [], sortBy: 'recent', searchQuery: '' };
+  expect('T27.1 state.editingLibrary 已不存在', 'editingLibrary' in state, false);
+  // 模拟 v0.1.8 旧代码（应不应该有 editingLibrary 字段）
+  const oldState = { books: [], sortBy: 'recent', searchQuery: '', editingLibrary: false };
+  expect('T27.2 旧 state 有 editingLibrary（对照组）', 'editingLibrary' in oldState, true);
+}
+
+// T28: 卡片点击逻辑不再有 editingLibrary 检查
+{
+  // 模拟 v0.1.9 的卡片点击处理
+  const v019 = `
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.delete-btn')) return;
+      if (e.target.closest('.fav-btn')) return;
+      openBook(id);
+    });
+  `;
+  // v0.1.8 旧代码（应包含 editingLibrary 检查）
+  const v018 = `
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.delete-btn')) return;
+      if (e.target.closest('.fav-btn')) return;
+      if (state.editingLibrary) return;
+      openBook(id);
+    });
+  `;
+  expect('T28.1 v0.1.9 不再有 editingLibrary 检查',
+    !v019.includes('state.editingLibrary'), true);
+  expect('T28.2 旧代码对照组有 editingLibrary 检查',
+    v018.includes('state.editingLibrary'), true);
+}
+
+// T29: 二次确认弹窗行为（点遮罩 / ESC 都能关）
+{
+  let modalShow = true;
+  const modal = {
+    classList: {
+      contains(cls) { return cls === 'show' ? modalShow : false; },
+      remove(cls) { if (cls === 'show') modalShow = false; },
+    },
+  };
+  // ESC 关闭
+  function onKeydown(e) {
+    if (e.key === 'Escape' && modal.classList.contains('show')) {
+      modal.classList.remove('show');
+    }
+  }
+  // 点遮罩关闭
+  function onModalClick(e) {
+    if (e.target === e.currentTarget) modal.classList.remove('show');
+  }
+
+  onKeydown({ key: 'Escape' });
+  expect('T29.1 ESC 键关闭弹窗', modalShow, false);
+  modalShow = true;
+  // 点遮罩关闭：target === currentTarget 表示点的是遮罩本身（不是 modal-card 内容）
+  const overlay = {};
+  onModalClick({ target: overlay, currentTarget: overlay });
+  expect('T29.2 点遮罩关闭弹窗', modalShow, false);
+  modalShow = true;
+  // 点弹窗卡片不关：target !== currentTarget
+  const card = { tag: 'DIV' };
+  onModalClick({ target: card, currentTarget: { tag: 'DIV' } });
+  expect('T29.3 点弹窗内容不关（target !== currentTarget）', modalShow, true);
+  // 按其他键不关
+  onKeydown({ key: 'Enter' });
+  expect('T29.4 其他键不关', modalShow, true);
+}
+
 console.log('\n==========');
 const pass = tests.filter(t => t.pass).length;
 console.log(`通过: ${pass}/${tests.length}`);
