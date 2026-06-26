@@ -533,6 +533,51 @@
       background: var(--accent);
       transition: width 0.2s;
     }
+    /* v0.2.0：句级高亮（TTS 播放时） */
+    .sentence.speaking {
+      background: rgba(200, 60, 60, 0.22);
+      border-radius: 3px;
+      transition: background 0.15s;
+    }
+    .sentence.past {
+      color: var(--text-dim, rgba(0,0,0,0.55));
+      transition: color 0.3s;
+    }
+    /* v0.2.0：选区浮动按钮 */
+    .selection-fab {
+      position: fixed;
+      z-index: 9999;
+      display: flex; align-items: center; justify-content: center;
+      min-width: 120px; height: 36px;
+      padding: 0 14px;
+      font-size: 14px; font-weight: 500;
+      color: #fff;
+      background: rgba(60, 60, 60, 0.92);
+      border: none; border-radius: 18px;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+      transition: transform 0.1s, background 0.15s;
+    }
+    .selection-fab:active { transform: scale(0.95); background: rgba(200, 60, 60, 0.95); }
+    /* v0.2.1：顶部 12px 触发条（常驻） —— 隐藏的入口 */
+    .reader-top-grip {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: 12px;
+      z-index: 25;
+      background: transparent;
+      border-bottom: 0.5px solid transparent;
+      transition: border-color 0.2s;
+      cursor: pointer;
+    }
+    .reader-top-grip:hover,
+    .reader-top-grip:active {
+      border-bottom-color: rgba(0,0,0,0.08);
+    }
     .reader-player-inner {
       display: flex; align-items: center; gap: 12px;
       padding: 10px 16px 10px;
@@ -936,6 +981,8 @@
       <div class="reader-content" id="readerContent">
         <div class="reader-inner" id="readerInner"></div>
       </div>
+      <!-- v0.2.1：顶部 12px 触发条（隐藏的入口） -->
+      <div class="reader-top-grip" id="readerTopGrip"></div>
 
       <div class="reader-header" id="readerHeader">
         <div class="reader-header-inner">
@@ -978,11 +1025,6 @@
             <svg viewBox="0 0 24 24"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1v-6h3v4zM3 19a2 2 0 0 0 2 2h1v-6H3v4z"/></svg>
           </button>
         </div>
-      </div>
-      <div class="reader-tap-zones">
-        <div class="left-zone" id="tapLeft"></div>
-        <div class="center-zone" id="tapCenter"></div>
-        <div class="right-zone" id="tapRight"></div>
       </div>
     </section>
 
@@ -1799,6 +1841,8 @@
 
     // 解析章节
     state.chapters = parseChapters(content.text, state.settings.chapterPattern);
+    // v0.2.2：写 URL hash，刷新能恢复阅读页
+    location.hash = '#reader=' + encodeURIComponent(meta.id);
     showReader();
   }
 
@@ -1832,9 +1876,13 @@
       });
     });
 
-    // 恢复位置
-    const pos = state.positions[state.currentBookId] || { offset: 0 };
-    setTimeout(() => scrollToOffset(pos.offset), 80);
+    // 恢复位置（v0.2.3：用 progress 字段）
+        const pos = state.positions[state.currentBookId] || { offset: 0, progress: 0, ttsSentence: 0 };
+        setTimeout(() => scrollToProgress(pos.progress || 0), 80);
+        // v0.2.4：恢复 TTS 朗读位置（不自动播，用户点 play 从此处开始）
+        if (pos.ttsSentence && typeof tts !== 'undefined') {
+          tts.currentSentenceIdx = pos.ttsSentence;
+        }
 
     // 显示顶栏 0.5 秒后自动隐藏
     state.headerVisible = true;
@@ -1866,21 +1914,47 @@
     $('#readerContent').classList.toggle('player-hidden', !state.playerVisible);
   }
 
+  // v0.2.1：toggleChrome —— 工具栏呼出/隐藏统一入口 + 8 秒自动收
+  let chromeHideTimer = null;
+  function toggleChrome(forceShow) {
+    const willShow = forceShow != null ? forceShow : !state.headerVisible;
+    state.headerVisible = willShow;
+    state.playerVisible = willShow;
+    updateChrome();
+    if (chromeHideTimer) { clearTimeout(chromeHideTimer); chromeHideTimer = null; }
+    if (willShow) {
+      // 8 秒不动 → 自动收
+      chromeHideTimer = setTimeout(() => {
+        state.headerVisible = false;
+        state.playerVisible = false;
+        updateChrome();
+        chromeHideTimer = null;
+      }, 8000);
+    }
+  }
+  // 用户操作工具栏按钮 = 活跃，重置 8 秒计时
+  function pokeChrome() {
+    if (state.headerVisible) toggleChrome(true);
+  }
+
+  // v0.2.3：用 progress 恢复（0~1 比例，不受 DOM 结构变化影响）
+  // 旧的 offset 像素值在 v0.2.0 加 .sentence span 后失效（inline span offsetTop=0），
+  // 改用 progress * total 永远不会因为 DOM 高度变化而错位
   function scrollToOffset(offset) {
-    // 找到包含该 offset 的元素
+    // 兼容老调用：把 offset 当成"百分比 × 100"也能 work（fallback）
+    // 但正确做法是直接传 progress
+  }
+  function scrollToProgress(progress) {
+    const c = $('#readerContent');
     const inner = $('#readerInner');
-    const elements = inner.querySelectorAll('[data-chapter], .sentence');
-    let target = null;
-    for (const el of elements) {
-      const top = el.offsetTop;
-      if (top <= offset) target = el;
-      else break;
+    if (!c || !inner) return;
+    const total = inner.scrollHeight - c.clientHeight;
+    if (total <= 0) {
+      // DOM 还没 layout 完，等 16ms 再试
+      setTimeout(() => scrollToProgress(progress), 16);
+      return;
     }
-    if (target) {
-      $('#readerContent').scrollTop = target.offsetTop - 40;
-    } else {
-      $('#readerContent').scrollTop = 0;
-    }
+    c.scrollTop = Math.max(0, Math.min(total, progress * total));
   }
 
   function getCurrentOffset() {
@@ -1901,7 +1975,11 @@
       el.addEventListener('click', () => {
         const idx = parseInt(el.dataset.idx, 10);
         const target = state.chapters[idx];
-        scrollToOffset(target.offset);
+        // v0.2.3：章节切换用 progress 字段（DOM 结构变化不敏感）
+        // 通过 target.offset (字符偏移) 算出 progress = 字符位置 / 总长度
+        const totalChars = (state.currentBook && state.currentBook.content) ? state.currentBook.content.length : 1;
+        const progress = totalChars > 0 ? target.offset / totalChars : 0;
+        scrollToProgress(progress);
         closeToc();
       });
     });
@@ -2008,8 +2086,16 @@
     if (id === 'page-library') {
       stopTTS();
       renderLibrary();
+      // v0.2.2：同步写 hash
+      if (location.hash !== '#library') location.hash = '#library';
     } else if (id === 'page-home') {
       renderHome();
+      // v0.2.2：home = 默认页（无 hash 或 #home）
+      if (location.hash && location.hash !== '#home') {
+        // 保留 #reader 等，不清；只有从其他页回 home 才清
+      }
+    } else if (id === 'page-settings') {
+      if (location.hash !== '#settings') location.hash = '#settings';
     }
   }
 
@@ -2359,15 +2445,31 @@
     $('#playSpinner').style.display = showSpin ? 'inline-block' : 'none';
   }
   function highlightSentence(idx) {
-    clearSpeakingHighlight();
-    const sentences = $$('.sentence');
-    // 简化高亮：标记前一个为 past，当前为 speaking
-    for (let i = 0; i < sentences.length; i++) {
-      if (i < idx) sentences[i].classList.add('past');
+      clearSpeakingHighlight();
+      const sentences = $$('.sentence');
+      // 简化高亮：标记前一个为 past，当前为 speaking
+      // v0.2.0：滚动跟随交给 ontimeupdate 里的 maybeScrollToCurrentSentence（保守策略）
+      // v0.2.4：朗读切句时同步记 currentSentenceIdx（保证 TTS 位置持久化）
+      if (typeof tts !== 'undefined') tts.currentSentenceIdx = idx;
+      for (let i = 0; i < sentences.length; i++) {
+        if (i < idx) sentences[i].classList.add('past');
+      }
+      if (sentences[idx]) {
+        sentences[idx].classList.add('speaking');
+      }
     }
-    if (sentences[idx]) {
-      sentences[idx].classList.add('speaking');
-      sentences[idx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+  // v0.2.0：保守滚动跟随 —— 当前朗读句"快出视口"才滚（避免每句都抖）
+  function maybeScrollToCurrentSentence() {
+    const sentences = $$('.sentence');
+    const el = sentences[tts.currentSentenceIdx];
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const vh = window.innerHeight;
+    const topMargin = 80;     // 顶栏 + 一点呼吸
+    const bottomMargin = 120; // 工具栏 + 进度条 + 一点呼吸
+    if (rect.top < topMargin || rect.bottom > vh - bottomMargin) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   }
 
@@ -2537,6 +2639,8 @@
         tts.currentSentenceIdx = sentenceIdx;
         highlightSentence(sentenceIdx);
         updateNowPlaying();
+        // v0.2.0：保守滚动跟随（快出视口才滚；拖进度条时不滚）
+        if (!state.progressDragging) maybeScrollToCurrentSentence();
       }
     };
 
@@ -2738,25 +2842,105 @@
   });
   $('#playerMode').addEventListener('click', openTTSModal);
 
-  // 进度条：阅读进度（不是播放进度，因为每句独立）
-  const savePosDebounced = debounce(() => {
+  // v0.2.4：阅读位置保存改为「立即更新内存 + 节流写盘 + pagehide 兜底」
+  // 旧 savePosDebounced (debounce 600ms) 的 bug：用户快速滚动后立刻操作（退出/刷新/换书），
+  // 600ms 内没存 → 位置丢失。
+  // 新策略：scroll 立即更新 state.positions（内存），每 2s 节流写 localStorage，
+  // pagehide/beforeunload 强制同步写。
+  function savePosImmediate() {
     if (!state.currentBookId) return;
-    const offset = getCurrentOffset();
-    const total = $('#readerInner').scrollHeight - $('#readerContent').clientHeight;
+    const c = $('#readerContent');
+    const inner = $('#readerInner');
+    if (!c || !inner) return;
+    const offset = c.scrollTop;
+    const total = inner.scrollHeight - c.clientHeight;
     const prog = total > 0 ? Math.min(1, Math.max(0, offset / total)) : 0;
-    state.positions[state.currentBookId] = { offset, progress: prog };
-    saveMeta();
-    // 同步到 books meta
+    const ttsSentence = (typeof tts !== 'undefined' && tts.currentSentenceIdx) || 0;
+    state.positions[state.currentBookId] = { offset, progress: prog, ttsSentence };
+    // 同步到 books meta（书架卡片显示用）
     const meta = state.books.find(b => b.id === state.currentBookId);
     if (meta) {
       meta.lastReadAt = Date.now();
       meta.progress = prog;
     }
+  }
+
+  let lastLocalSave = 0;
+  function savePosThrottled() {
+    const now = Date.now();
+    if (now - lastLocalSave < 2000) return;  // 2s 节流
+    lastLocalSave = now;
     saveMeta();
-    // 更新进度条
-    $('#readerProgressFill').style.width = (prog * 100) + '%';
-  }, 600);
-  $('#readerContent').addEventListener('scroll', savePosDebounced);
+  }
+
+  $('#readerContent').addEventListener('scroll', () => {
+    savePosImmediate();
+    savePosThrottled();
+    // 同步更新进度条 fill（实时跟随）
+    if (state.currentBookId) {
+      const c = $('#readerContent');
+      const inner = $('#readerInner');
+      const total = inner.scrollHeight - c.clientHeight;
+      const prog = total > 0 ? c.scrollTop / total : 0;
+      $('#readerProgressFill').style.width = (prog * 100) + '%';
+    }
+  });
+
+  // 兜底：用户离开页面（退出/刷新/切书/关 tab）时强制同步存
+  window.addEventListener('pagehide', () => {
+    savePosImmediate();
+    saveMeta();
+  });
+  window.addEventListener('beforeunload', () => {
+    savePosImmediate();
+    saveMeta();
+  });
+  // iOS Safari 特殊：pagehide 在 bfcache 时不可靠，visibilitychange 兜底
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      savePosImmediate();
+      saveMeta();
+    }
+  });
+
+  // v0.2.1：工具栏显隐联动 —— 滚到顶自动呼出；开始往下滚自动收
+  $('#readerContent').addEventListener('scroll', () => {
+    const top = $('#readerContent').scrollTop;
+    if (top === 0 && !state.headerVisible) {
+      // 滚到顶 → 呼出（让用户换章）
+      toggleChrome(true);
+    } else if (state.headerVisible && top > 50) {
+      // 已显示 + 开始读 → 自动收
+      if (chromeHideTimer) { clearTimeout(chromeHideTimer); chromeHideTimer = null; }
+      state.headerVisible = false;
+      state.playerVisible = false;
+      updateChrome();
+    }
+  });
+
+  // v0.2.1：顶部 12px 触发条 —— 点击 + 下滑手势
+  $('#readerTopGrip').addEventListener('click', () => toggleChrome());
+  let gripTouchStartY = null;
+  $('#readerTopGrip').addEventListener('touchstart', (e) => {
+    gripTouchStartY = e.touches[0].clientY;
+  }, { passive: true });
+  $('#readerTopGrip').addEventListener('touchmove', (e) => {
+    if (gripTouchStartY == null) return;
+    const dy = e.touches[0].clientY - gripTouchStartY;
+    if (dy > 30) {
+      toggleChrome(true);
+      gripTouchStartY = null;
+    }
+  }, { passive: true });
+  $('#readerTopGrip').addEventListener('touchend', () => {
+    gripTouchStartY = null;
+  });
+
+  // v0.2.1：用户操作工具栏按钮 = 活跃，重置 8 秒计时
+  ['readerBack', 'readerSettingsBtn', 'playerPrev', 'playerPlay', 'playerNext', 'playerMode'].forEach(id => {
+    const el = $('#' + id);
+    if (el) el.addEventListener('click', pokeChrome);
+  });
 
   $('#readerProgressBar').addEventListener('click', (e) => {
     if (!state.currentBook) return;
@@ -2765,23 +2949,127 @@
     const total = $('#readerInner').scrollHeight - $('#readerContent').clientHeight;
     $('#readerContent').scrollTop = total * ratio;
   });
-  // 触屏点击区
-  // 上下 = 跨章跳转，左右 = 章内翻屏，中 = 切换工具栏
-  $('#tapLeft').addEventListener('click', () => {
-    if (!state.currentBook) return;
-    const c = $('#readerContent');
-    c.scrollBy({ top: -window.innerHeight * 0.85, behavior: 'smooth' });
-  });
-  $('#tapRight').addEventListener('click', () => {
-    if (!state.currentBook) return;
-    const c = $('#readerContent');
-    c.scrollBy({ top: window.innerHeight * 0.85, behavior: 'smooth' });
-  });
-  $('#tapCenter').addEventListener('click', () => {
-    state.headerVisible = !state.headerVisible;
-    state.playerVisible = state.headerVisible;
-    updateChrome();
-  });
+  // v0.2.0：进度条拖动支持（pointerdown/move/up，不打断点击跳转）
+  (function setupProgressDrag() {
+    const bar = $('#readerProgressBar');
+    let dragging = false;
+    let dragStartRatio = 0;
+    function pctFromEvent(e) {
+      const rect = bar.getBoundingClientRect();
+      const x = (e.clientX != null ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0));
+      return Math.max(0, Math.min(1, (x - rect.left) / rect.width));
+    }
+    function applyRatio(r) {
+      if (!state.currentBook) return;
+      const total = $('#readerInner').scrollHeight - $('#readerContent').clientHeight;
+      $('#readerContent').scrollTop = total * r;
+      $('#readerProgressFill').style.width = (r * 100) + '%';
+      // 拖动时暂停朗读滚动跟随（避免一抖一抖）
+      state.progressDragging = true;
+    }
+    bar.addEventListener('pointerdown', (e) => {
+      dragging = true;
+      dragStartRatio = pctFromEvent(e);
+      applyRatio(dragStartRatio);
+      bar.setPointerCapture && bar.setPointerCapture(e.pointerId);
+    });
+    bar.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      applyRatio(pctFromEvent(e));
+    });
+    function endDrag() {
+      if (!dragging) return;
+      dragging = false;
+      state.progressDragging = false;
+    }
+    bar.addEventListener('pointerup', endDrag);
+    bar.addEventListener('pointercancel', endDrag);
+    bar.addEventListener('pointerleave', endDrag);
+  })();
+
+  // v0.2.0：选区浮动按钮 + 从此处朗读
+  (function setupSelectionFab() {
+    const fab = document.createElement('button');
+    fab.className = 'selection-fab';
+    fab.textContent = '从此处朗读';
+    fab.style.display = 'none';
+    document.body.appendChild(fab);
+
+    function getSentenceIdxFromSelection() {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return null;
+      const range = sel.getRangeAt(0);
+      const readerContent = $('#readerContent');
+      if (!readerContent || !readerContent.contains(range.commonAncestorContainer)) return null;
+      // 找到选区起点所在的 .sentence span
+      let node = range.startContainer;
+      if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+      while (node && node !== readerContent) {
+        if (node.classList && node.classList.contains('sentence')) {
+          const all = readerContent.querySelectorAll('.sentence');
+          for (let i = 0; i < all.length; i++) if (all[i] === node) return i;
+        }
+        node = node.parentElement;
+      }
+      return null;
+    }
+
+    function updateFab() {
+      const sel = window.getSelection();
+      if (!sel || sel.toString().trim() === '') {
+        fab.style.display = 'none';
+        return;
+      }
+      const range = sel.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) { fab.style.display = 'none'; return; }
+      fab.style.display = 'flex';
+      // 定位：选区上方居中
+      fab.style.left = Math.max(8, rect.left + rect.width / 2 - 60) + 'px';
+      fab.style.top = Math.max(8, rect.top - 44) + 'px';
+    }
+
+    document.addEventListener('selectionchange', updateFab);
+    // 滚动/缩放时也更新位置
+    $('#readerContent').addEventListener('scroll', () => {
+      if (fab.style.display !== 'none') updateFab();
+    });
+
+    fab.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const idx = getSentenceIdxFromSelection();
+      if (idx == null) return;
+      if (typeof tts !== 'undefined' && typeof playSentence === 'function') {
+        playSentence(idx);
+      }
+      fab.style.display = 'none';
+      window.getSelection().removeAllRanges();
+    });
+    // 选区朗读后点击别处应关闭 fab
+    document.addEventListener('click', (e) => {
+      if (fab.style.display === 'none') return;
+      if (e.target === fab || fab.contains(e.target)) return;
+      // 延迟一帧避免和 selectionchange 抢
+      setTimeout(() => {
+        const sel = window.getSelection();
+        if (!sel || sel.toString().trim() === '') fab.style.display = 'none';
+      }, 0);
+    });
+  })();
+
+  // v0.2.0：TTS 句级高亮 + 滚动跟随（保守策略）
+  // 切句前置：阅读器文本按句切分渲染（确保有 .sentence 粒度）
+  (function setupSentenceHighlight() {
+    // 暴露一个全局：渲染时调 applySentenceSplit(text) 返回 HTML
+    window.__splitIntoSentences = function splitIntoSentences(text) {
+      // 按中文/英文常见句末标点切分，保留标点本身
+      // 规则：。！？!?；;\n 任一即切
+      const re = /[^。！？!?；;\n]+[。！？!?；;\n]?/g;
+      const parts = text.match(re) || [text];
+      return parts.map(s => `<span class="sentence">${escapeHtml(s)}</span>`).join('');
+    };
+  })();
 
   // ===== TTS 设置模态 =====
   function openTTSModal() {
@@ -3230,7 +3518,40 @@
     // 章节识别关键词：默认值明文填入，避免 placeholder 被误认为已配置
     $('#chapterPatternInput').value = state.settings.chapterPattern || DEFAULT_SETTINGS.chapterPattern;
     checkFirstRun();
+
+    // v0.2.2：根据 URL hash 决定初始页（修复刷新跳书架 bug）
+    handleHashRoute();
+    window.addEventListener('hashchange', handleHashRoute);
   }
+
+  // v0.2.2：hash 路由 —— 刷新/前进后退 都能恢复页面
+  function handleHashRoute() {
+    const h = location.hash || '';
+    if (h.startsWith('#reader=')) {
+      const bookId = decodeURIComponent(h.slice('#reader='.length));
+      if (bookId && state.books.find(b => b.id === bookId)) {
+        openBook(bookId);
+        return;
+      }
+      // 找不到书 → 静默回首页
+      location.hash = '';
+      switchPage('page-home');
+      return;
+    }
+    if (h === '#library') {
+      switchPage('page-library');
+      return;
+    }
+    if (h === '#settings') {
+      switchPage('page-settings');
+      return;
+    }
+    // 无 hash 或 #home → 默认首页
+    if (!h || h === '#home') {
+      switchPage('page-home');
+    }
+  }
+
   init();
   </script>
 </body>

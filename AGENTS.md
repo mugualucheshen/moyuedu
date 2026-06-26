@@ -61,3 +61,107 @@ node tests/core.test.js    # 期望 23/23
   - `.reader-content` 用 `touch-action: none` + `wheel` 事件拦截禁用手动滚动
 - 上传入口 —— `index.html` ~1590 行附近
   - `uploadFile.arrayBuffer()` 必须包 `new Uint8Array(...)`，否则 `.subarray()` / `.length` 不可用
+
+### v0.2.0 阅读器交互重构（2026-06-26 · feat/reader-free-scroll）
+
+砍掉 3 个点击分区（`tapLeft` `tapCenter` `tapRight`），阅读器改为自然滚动 + 4 项新功能：
+
+| 功能 | 实现位置 | 说明 |
+|---|---|---|
+| **进度条拖动** | `setupProgressDrag` ~2785 行 | pointerdown/move/up，拖动时暂停朗读滚动跟随 |
+| **选区浮动按钮** | `setupSelectionFab` ~2830 行 | 选中文字上方出现"从此处朗读"按钮 |
+| **句级高亮** | `.sentence.speaking` / `.past` CSS + `highlightSentence` ~2395 行 | 当前朗读句红色背景，之前的灰显 |
+| **滚动跟随** | `maybeScrollToCurrentSentence` ~2402 行 | 快出视口（top<80 / bottom>vh-120）才滚，保守策略 |
+
+**保留**：底部工具栏所有按钮（prev/play/next/mode）不动；进度条点击跳转保留作 fallback。
+
+**键盘兼容**：选区 fab 在 iOS Safari 长按选中 + 桌面鼠标拖选都能触发。
+
+**测试**：tests/core.test.js 新增 T30~T33 共 18 个测试，全部通过（120/120）。
+
+### v0.2.1 工具栏呼出入口（2026-06-26 · feat/reader-free-scroll）
+
+砍掉 3 个点击分区后，**工具栏没有入口呼出**了（之前 tapCenter 兼任）。补 3 个入口：
+
+| 入口 | 实现位置 | 行为 |
+|---|---|---|
+| **顶部 12px 触发条** | `#readerTopGrip` ~2847 行 + CSS ~566 行 | 常驻透明条，点 / 下滑 30px → 呼出 |
+| **滚到顶自动呼出** | scroll listener ~2841 行 | scrollTop=0 + 隐藏状态 → 自动显示（让用户换章）|
+| **8 秒自动收** | `chromeHideTimer` ~1913 行 | 呼出后 8 秒不动 → 自动隐藏；点工具栏按钮重置计时 |
+
+**已显示时往下滚** → 立即收（用户开始读就不打扰）。
+
+**测试**：tests/core.test.js 新增 T34.1~T34.7 共 11 个测试，全部通过（131/131）。
+
+### v0.2.2 刷新跳书架 bug 修复（2026-06-26 · feat/reader-free-scroll）
+
+**症状**：正在阅读某本书时刷新浏览器 → 自动跳回书架页（不是回到阅读器）。
+
+**根因**：当前页/当前书的状态在内存里，刷新后丢失；启动时默认进 `page-home`。
+
+**修法**：URL hash 路由（深链接顺便支持）
+
+| 行为 | 实现 |
+|---|---|
+| `openBook(id)` 写 hash | `location.hash = '#reader=' + encodeURIComponent(meta.id)` |
+| `switchPage(library/settings)` 写 hash | `#library` / `#settings` |
+| `switchPage(home)` 清 hash | `location.hash = ''` |
+| 启动读 hash | `init()` 末尾调 `handleHashRoute()` |
+| 浏览器前进/后退 | `window.addEventListener('hashchange', handleHashRoute)` |
+| 找不到书兜底 | `state.books.find(b => b.id === bookId)` 失败 → 清 hash + 切 home |
+| 特殊字符 bookId | `encodeURIComponent` / `decodeURIComponent` 双向处理 |
+
+**测试**：tests/core.test.js 新增 T35.1~T35.5 共 16 个测试，全部通过（147/147）。
+
+### v0.2.3 刷新位置丢失 bug 修复（2026-06-26 · feat/reader-free-scroll）
+
+**症状**：滚到第 10 段 → 退出再进 ✅ 在第 10 段；刷新浏览器 ❌ 回到开头。
+
+**根因**：
+- 旧的 `scrollToOffset(pos.offset)` 用 `el.offsetTop` 找 DOM 元素
+- v0.2.0 加了 `<span class="sentence">` 子元素（inline 模式）
+- inline span 的 `offsetTop` 在父容器内常常是 0
+- 旧算法遍历元素时，**所有 span 都满足 `<=offset` 条件** → target 一直是最后一个 → `target.offsetTop - 40` = -40 → 滚到 0
+- 退出再进 OK 是因为小 offset 刚好能匹配到 chapter title
+
+**修法**：用 `pos.progress`（0~1 比例）恢复，与 DOM 结构无关
+
+| 旧 | 新 |
+|---|---|
+| `scrollToOffset(pos.offset)` 用像素找 DOM 元素 | `scrollToProgress(pos.progress)` = progress × total |
+| DOM 高度变化 → 失效 | DOM 高度变化 → 不影响 |
+| 找不到匹配 → 滚到 0 | 永远能算出一个位置 |
+
+**章节切换**：用 `chapterCharOffset / totalChars` 换算成 progress（之前直接传字符 offset 给 scrollToOffset 也失效了）。
+
+**进度丢失兜底**：`scrollToProgress` 内 total<=0 时 16ms 后重试（DOM 没 layout 完）。
+
+**测试**：tests/core.test.js 新增 T36.1~T36.5 共 13 个测试，全部通过（160/160）。
+
+### v0.2.4 阅读位置保存重写（2026-06-26 · feat/reader-free-scroll）
+
+**症状**（老板反馈）：
+- 滚到第 10 段 → 退出/刷新/换书 → **全部丢位置**
+- 朗读位置也没记，下次进阅读器从第 1 句开始读
+
+**根因**：旧的 `savePosDebounced = debounce(..., 600)` 用防抖（debounce）模式：
+- scroll 触发 → 600ms 计时器开始 → 又触发 → 重置 → 一直重置
+- **用户"快速滚动后立刻操作"是常态**（滚到想看的地方 → 立刻切走/退出/刷新）
+- 600ms 内没停下来 → debounce 永不触发 → 永远丢
+
+**修法**：3 层保障
+
+| 层 | 实现 | 目的 |
+|---|---|---|
+| **1. 立即更新内存** | `savePosImmediate()` 在 scroll 时立即写 `state.positions` | 内存永远最新 |
+| **2. 节流写 localStorage** | `savePosThrottled()` 每 2s 最多 1 次 `saveMeta()` | 不爆 IO |
+| **3. 离开页面兜底** | `pagehide` + `beforeunload` + `visibilitychange(hidden)` 强制同步存 | 退出/刷新/切书/iOS 后台全部兜住 |
+
+**字段升级**：`{offset, progress}` → `{offset, progress, ttsSentence}`
+- `ttsSentence` 由 `highlightSentence(idx)` 每次切句时同步记录
+- `showReader` 恢复时 `tts.currentSentenceIdx = pos.ttsSentence` → 用户点 play 从上次听到的句子开始
+- **不自动播**（A 方案）：用户进阅读器后进度停在那，按 play 才继续
+
+**兼容老数据**：`{offset, progress}` 没 `ttsSentence` 时 fallback 到 0（从第 1 句开始）。
+
+**测试**：tests/core.test.js 新增 T37.1~T37.7 共 14 个测试，全部通过（174/174）。
