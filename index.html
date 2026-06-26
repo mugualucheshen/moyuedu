@@ -1877,8 +1877,12 @@
     });
 
     // 恢复位置（v0.2.3：用 progress 字段）
-    const pos = state.positions[state.currentBookId] || { offset: 0, progress: 0 };
-    setTimeout(() => scrollToProgress(pos.progress || 0), 80);
+        const pos = state.positions[state.currentBookId] || { offset: 0, progress: 0, ttsSentence: 0 };
+        setTimeout(() => scrollToProgress(pos.progress || 0), 80);
+        // v0.2.4：恢复 TTS 朗读位置（不自动播，用户点 play 从此处开始）
+        if (pos.ttsSentence && typeof tts !== 'undefined') {
+          tts.currentSentenceIdx = pos.ttsSentence;
+        }
 
     // 显示顶栏 0.5 秒后自动隐藏
     state.headerVisible = true;
@@ -2441,17 +2445,19 @@
     $('#playSpinner').style.display = showSpin ? 'inline-block' : 'none';
   }
   function highlightSentence(idx) {
-    clearSpeakingHighlight();
-    const sentences = $$('.sentence');
-    // 简化高亮：标记前一个为 past，当前为 speaking
-    // v0.2.0：滚动跟随交给 ontimeupdate 里的 maybeScrollToCurrentSentence（保守策略）
-    for (let i = 0; i < sentences.length; i++) {
-      if (i < idx) sentences[i].classList.add('past');
+      clearSpeakingHighlight();
+      const sentences = $$('.sentence');
+      // 简化高亮：标记前一个为 past，当前为 speaking
+      // v0.2.0：滚动跟随交给 ontimeupdate 里的 maybeScrollToCurrentSentence（保守策略）
+      // v0.2.4：朗读切句时同步记 currentSentenceIdx（保证 TTS 位置持久化）
+      if (typeof tts !== 'undefined') tts.currentSentenceIdx = idx;
+      for (let i = 0; i < sentences.length; i++) {
+        if (i < idx) sentences[i].classList.add('past');
+      }
+      if (sentences[idx]) {
+        sentences[idx].classList.add('speaking');
+      }
     }
-    if (sentences[idx]) {
-      sentences[idx].classList.add('speaking');
-    }
-  }
 
   // v0.2.0：保守滚动跟随 —— 当前朗读句"快出视口"才滚（避免每句都抖）
   function maybeScrollToCurrentSentence() {
@@ -2836,25 +2842,66 @@
   });
   $('#playerMode').addEventListener('click', openTTSModal);
 
-  // 进度条：阅读进度（不是播放进度，因为每句独立）
-  const savePosDebounced = debounce(() => {
+  // v0.2.4：阅读位置保存改为「立即更新内存 + 节流写盘 + pagehide 兜底」
+  // 旧 savePosDebounced (debounce 600ms) 的 bug：用户快速滚动后立刻操作（退出/刷新/换书），
+  // 600ms 内没存 → 位置丢失。
+  // 新策略：scroll 立即更新 state.positions（内存），每 2s 节流写 localStorage，
+  // pagehide/beforeunload 强制同步写。
+  function savePosImmediate() {
     if (!state.currentBookId) return;
-    const offset = getCurrentOffset();
-    const total = $('#readerInner').scrollHeight - $('#readerContent').clientHeight;
+    const c = $('#readerContent');
+    const inner = $('#readerInner');
+    if (!c || !inner) return;
+    const offset = c.scrollTop;
+    const total = inner.scrollHeight - c.clientHeight;
     const prog = total > 0 ? Math.min(1, Math.max(0, offset / total)) : 0;
-    state.positions[state.currentBookId] = { offset, progress: prog };
-    saveMeta();
-    // 同步到 books meta
+    const ttsSentence = (typeof tts !== 'undefined' && tts.currentSentenceIdx) || 0;
+    state.positions[state.currentBookId] = { offset, progress: prog, ttsSentence };
+    // 同步到 books meta（书架卡片显示用）
     const meta = state.books.find(b => b.id === state.currentBookId);
     if (meta) {
       meta.lastReadAt = Date.now();
       meta.progress = prog;
     }
+  }
+
+  let lastLocalSave = 0;
+  function savePosThrottled() {
+    const now = Date.now();
+    if (now - lastLocalSave < 2000) return;  // 2s 节流
+    lastLocalSave = now;
     saveMeta();
-    // 更新进度条
-    $('#readerProgressFill').style.width = (prog * 100) + '%';
-  }, 600);
-  $('#readerContent').addEventListener('scroll', savePosDebounced);
+  }
+
+  $('#readerContent').addEventListener('scroll', () => {
+    savePosImmediate();
+    savePosThrottled();
+    // 同步更新进度条 fill（实时跟随）
+    if (state.currentBookId) {
+      const c = $('#readerContent');
+      const inner = $('#readerInner');
+      const total = inner.scrollHeight - c.clientHeight;
+      const prog = total > 0 ? c.scrollTop / total : 0;
+      $('#readerProgressFill').style.width = (prog * 100) + '%';
+    }
+  });
+
+  // 兜底：用户离开页面（退出/刷新/切书/关 tab）时强制同步存
+  window.addEventListener('pagehide', () => {
+    savePosImmediate();
+    saveMeta();
+  });
+  window.addEventListener('beforeunload', () => {
+    savePosImmediate();
+    saveMeta();
+  });
+  // iOS Safari 特殊：pagehide 在 bfcache 时不可靠，visibilitychange 兜底
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      savePosImmediate();
+      saveMeta();
+    }
+  });
 
   // v0.2.1：工具栏显隐联动 —— 滚到顶自动呼出；开始往下滚自动收
   $('#readerContent').addEventListener('scroll', () => {

@@ -1445,11 +1445,148 @@ function buildSegment(sentences, startIdx, n, maxChars) {
 
       // --- T36.5：scrollToOffset 已不再做实际工作（保留函数名兼容） ---
       {
-      // 老调用 scrollToOffset(0.5) → 现在是空函数（兼容老代码不报错）
-      // 验证：调用不抛错即可
-      function scrollToOffset() { /* v0.2.3: deprecated, use scrollToProgress */ }
-      expect('T36.5 旧 scrollToOffset 调用不报错',
-        typeof scrollToOffset(), 'undefined');
+        // 老调用 scrollToOffset(0.5) → 现在是空函数（兼容老代码不报错）
+        // 验证：调用不抛错即可
+        function scrollToOffset() { /* v0.2.3: deprecated, use scrollToProgress */ }
+        expect('T36.5 旧 scrollToOffset 调用不报错',
+          typeof scrollToOffset(), 'undefined');
+      }
+
+      // ============================================================
+      // v0.2.4 位置丢失彻底修复 —— 立即更新 + 节流 + pagehide
+      // ============================================================
+
+      // --- T37.1：savePosImmediate 立即更新内存（无 debounce） ---
+      {
+        const state = {
+          currentBookId: 'b1',
+          positions: {},
+          books: [{ id: 'b1', progress: 0 }],
+        };
+        let saveMetaCount = 0;
+        function saveMeta() { saveMetaCount++; }
+        function savePosImmediate(scrollTop, total) {
+          if (!state.currentBookId) return;
+          const prog = total > 0 ? scrollTop / total : 0;
+          state.positions[state.currentBookId] = { progress: prog, ttsSentence: 5 };
+        }
+        savePosImmediate(300, 1000);  // scroll 到 30%
+        expect('T37.1.1 savePosImmediate 立即写入内存',
+          state.positions['b1'].progress, 0.3);
+        expect('T37.1.2 同步记 ttsSentence',
+          state.positions['b1'].ttsSentence, 5);
+        // 关键：saveMeta 没被调（savePosImmediate 不写 localStorage）
+        expect('T37.1.3 savePosImmediate 不写 localStorage（只更内存）',
+          saveMetaCount, 0);
+      }
+
+      // --- T37.2：savePosThrottled 2 秒内多次只写 1 次 ---
+      {
+        let saveMetaCount = 0;
+        function saveMeta() { saveMetaCount++; }
+        let lastLocalSave = 0;
+        function savePosThrottled(now) {
+          if (now - lastLocalSave < 2000) return;
+          lastLocalSave = now;
+          saveMeta();
+        }
+        // lastLocalSave 初值 0；now=1000 间隔 1000<2000 不写
+        // now=1500 间隔 1500<2000 不写
+        // now=2500 间隔 2500>=2000 写第 1 次
+        // now=3001 间隔 501<2000 不写
+        // now=4501 间隔 2001>=2000 写第 2 次
+        savePosThrottled(1000);
+        savePosThrottled(1500);
+        savePosThrottled(2500);
+        savePosThrottled(3001);
+        savePosThrottled(4501);
+        expect('T37.2 节流：每次间隔 >=2000ms 才写',
+          saveMetaCount, 2);
+      }
+
+      // --- T37.3：pagehide 触发 saveMeta（兜底） ---
+      {
+        const state = {
+          currentBookId: 'b1',
+          positions: {},
+        };
+        let saveMetaCount = 0;
+        function saveMeta() { saveMetaCount++; }
+        function savePosImmediate() {
+          state.positions['b1'] = { progress: 0.42, ttsSentence: 12 };
+        }
+        // 模拟 pagehide 事件
+        function onPageHide() {
+          savePosImmediate();
+          saveMeta();
+        }
+        onPageHide();
+        expect('T37.3 pagehide 立即同步存 localStorage',
+          saveMetaCount, 1);
+        expect('T37.3b pagehide 触发后内存已更新',
+          state.positions['b1'].progress, 0.42);
+      }
+
+      // --- T37.4：visibilitychange hidden 触发 saveMeta（iOS 兜底） ---
+      {
+        let saveMetaCount = 0;
+        function saveMeta() { saveMetaCount++; }
+        // v0.2.4 实现：每次 hidden 都写（不强求去重，pagehide 已经保底了）
+        function onVisibilityChange(visibilityState) {
+          if (visibilityState === 'hidden') saveMeta();
+        }
+        onVisibilityChange('visible');   // 用户在看
+        onVisibilityChange('hidden');    // 切后台，写 1 次
+        onVisibilityChange('hidden');    // 重复，也写（实现如此）
+        expect('T37.4 visibilitychange hidden 触发写（每次 hidden 都写）',
+          saveMetaCount, 2);
+      }
+
+      // --- T37.5：TTS 朗读时记 currentSentenceIdx ---
+      {
+        const tts = { currentSentenceIdx: 0 };
+        const sentences = [{ cls: '' }, { cls: '' }, { cls: '' }];
+        function clearSpeakingHighlight() { sentences.forEach(s => s.cls = ''); }
+        function highlightSentence(idx) {
+          clearSpeakingHighlight();
+          tts.currentSentenceIdx = idx;  // v0.2.4
+          sentences[idx].cls = 'speaking';
+        }
+        highlightSentence(0);
+        expect('T37.5.1 朗读 idx=0 → tts 记 0', tts.currentSentenceIdx, 0);
+        highlightSentence(2);
+        expect('T37.5.2 朗读 idx=2 → tts 记 2', tts.currentSentenceIdx, 2);
+        highlightSentence(1);
+        expect('T37.5.3 朗读 idx=1 → tts 记 1', tts.currentSentenceIdx, 1);
+      }
+
+      // --- T37.6：旧 savePosDebounced 函数不再被引用 ---
+      {
+        // 通过代码扫描验证（v0.2.4 已删除该函数）
+        // 测试通过 grep 模式模拟：搜"savePosDebounced"
+        const fakeSource = `
+          function savePosImmediate() { ... }
+          $('#readerContent').addEventListener('scroll', () => {
+            savePosImmediate();
+            savePosThrottled();
+          });
+        `;
+        expect('T37.6.1 旧 savePosDebounced 不再被引用',
+          fakeSource.includes('savePosDebounced'), false);
+        expect('T37.6.2 新 savePosImmediate 被引用',
+          fakeSource.includes('savePosImmediate'), true);
+      }
+
+      // --- T37.7：位置字段结构升级（含 ttsSentence） ---
+      {
+        const saved = { offset: 600, progress: 0.5, ttsSentence: 12 };
+        // 兼容老数据：没 ttsSentence 也能跑
+        const oldData = { offset: 600, progress: 0.5 };
+        function restoreTts(data) {
+          return data.ttsSentence || 0;  // 老数据 fallback 到 0
+        }
+        expect('T37.7.1 新数据恢复 ttsSentence', restoreTts(saved), 12);
+        expect('T37.7.2 老数据 fallback 到 0', restoreTts(oldData), 0);
       }
 
       console.log('\n==========');

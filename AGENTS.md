@@ -137,3 +137,31 @@ node tests/core.test.js    # 期望 23/23
 **进度丢失兜底**：`scrollToProgress` 内 total<=0 时 16ms 后重试（DOM 没 layout 完）。
 
 **测试**：tests/core.test.js 新增 T36.1~T36.5 共 13 个测试，全部通过（160/160）。
+
+### v0.2.4 阅读位置保存重写（2026-06-26 · feat/reader-free-scroll）
+
+**症状**（老板反馈）：
+- 滚到第 10 段 → 退出/刷新/换书 → **全部丢位置**
+- 朗读位置也没记，下次进阅读器从第 1 句开始读
+
+**根因**：旧的 `savePosDebounced = debounce(..., 600)` 用防抖（debounce）模式：
+- scroll 触发 → 600ms 计时器开始 → 又触发 → 重置 → 一直重置
+- **用户"快速滚动后立刻操作"是常态**（滚到想看的地方 → 立刻切走/退出/刷新）
+- 600ms 内没停下来 → debounce 永不触发 → 永远丢
+
+**修法**：3 层保障
+
+| 层 | 实现 | 目的 |
+|---|---|---|
+| **1. 立即更新内存** | `savePosImmediate()` 在 scroll 时立即写 `state.positions` | 内存永远最新 |
+| **2. 节流写 localStorage** | `savePosThrottled()` 每 2s 最多 1 次 `saveMeta()` | 不爆 IO |
+| **3. 离开页面兜底** | `pagehide` + `beforeunload` + `visibilitychange(hidden)` 强制同步存 | 退出/刷新/切书/iOS 后台全部兜住 |
+
+**字段升级**：`{offset, progress}` → `{offset, progress, ttsSentence}`
+- `ttsSentence` 由 `highlightSentence(idx)` 每次切句时同步记录
+- `showReader` 恢复时 `tts.currentSentenceIdx = pos.ttsSentence` → 用户点 play 从上次听到的句子开始
+- **不自动播**（A 方案）：用户进阅读器后进度停在那，按 play 才继续
+
+**兼容老数据**：`{offset, progress}` 没 `ttsSentence` 时 fallback 到 0（从第 1 句开始）。
+
+**测试**：tests/core.test.js 新增 T37.1~T37.7 共 14 个测试，全部通过（174/174）。
