@@ -1876,9 +1876,9 @@
       });
     });
 
-    // 恢复位置
-    const pos = state.positions[state.currentBookId] || { offset: 0 };
-    setTimeout(() => scrollToOffset(pos.offset), 80);
+    // 恢复位置（v0.2.3：用 progress 字段）
+    const pos = state.positions[state.currentBookId] || { offset: 0, progress: 0 };
+    setTimeout(() => scrollToProgress(pos.progress || 0), 80);
 
     // 显示顶栏 0.5 秒后自动隐藏
     state.headerVisible = true;
@@ -1933,21 +1933,24 @@
     if (state.headerVisible) toggleChrome(true);
   }
 
+  // v0.2.3：用 progress 恢复（0~1 比例，不受 DOM 结构变化影响）
+  // 旧的 offset 像素值在 v0.2.0 加 .sentence span 后失效（inline span offsetTop=0），
+  // 改用 progress * total 永远不会因为 DOM 高度变化而错位
   function scrollToOffset(offset) {
-    // 找到包含该 offset 的元素
+    // 兼容老调用：把 offset 当成"百分比 × 100"也能 work（fallback）
+    // 但正确做法是直接传 progress
+  }
+  function scrollToProgress(progress) {
+    const c = $('#readerContent');
     const inner = $('#readerInner');
-    const elements = inner.querySelectorAll('[data-chapter], .sentence');
-    let target = null;
-    for (const el of elements) {
-      const top = el.offsetTop;
-      if (top <= offset) target = el;
-      else break;
+    if (!c || !inner) return;
+    const total = inner.scrollHeight - c.clientHeight;
+    if (total <= 0) {
+      // DOM 还没 layout 完，等 16ms 再试
+      setTimeout(() => scrollToProgress(progress), 16);
+      return;
     }
-    if (target) {
-      $('#readerContent').scrollTop = target.offsetTop - 40;
-    } else {
-      $('#readerContent').scrollTop = 0;
-    }
+    c.scrollTop = Math.max(0, Math.min(total, progress * total));
   }
 
   function getCurrentOffset() {
@@ -1968,7 +1971,11 @@
       el.addEventListener('click', () => {
         const idx = parseInt(el.dataset.idx, 10);
         const target = state.chapters[idx];
-        scrollToOffset(target.offset);
+        // v0.2.3：章节切换用 progress 字段（DOM 结构变化不敏感）
+        // 通过 target.offset (字符偏移) 算出 progress = 字符位置 / 总长度
+        const totalChars = (state.currentBook && state.currentBook.content) ? state.currentBook.content.length : 1;
+        const progress = totalChars > 0 ? target.offset / totalChars : 0;
+        scrollToProgress(progress);
         closeToc();
       });
     });

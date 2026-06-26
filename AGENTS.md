@@ -112,3 +112,28 @@ node tests/core.test.js    # 期望 23/23
 | 特殊字符 bookId | `encodeURIComponent` / `decodeURIComponent` 双向处理 |
 
 **测试**：tests/core.test.js 新增 T35.1~T35.5 共 16 个测试，全部通过（147/147）。
+
+### v0.2.3 刷新位置丢失 bug 修复（2026-06-26 · feat/reader-free-scroll）
+
+**症状**：滚到第 10 段 → 退出再进 ✅ 在第 10 段；刷新浏览器 ❌ 回到开头。
+
+**根因**：
+- 旧的 `scrollToOffset(pos.offset)` 用 `el.offsetTop` 找 DOM 元素
+- v0.2.0 加了 `<span class="sentence">` 子元素（inline 模式）
+- inline span 的 `offsetTop` 在父容器内常常是 0
+- 旧算法遍历元素时，**所有 span 都满足 `<=offset` 条件** → target 一直是最后一个 → `target.offsetTop - 40` = -40 → 滚到 0
+- 退出再进 OK 是因为小 offset 刚好能匹配到 chapter title
+
+**修法**：用 `pos.progress`（0~1 比例）恢复，与 DOM 结构无关
+
+| 旧 | 新 |
+|---|---|
+| `scrollToOffset(pos.offset)` 用像素找 DOM 元素 | `scrollToProgress(pos.progress)` = progress × total |
+| DOM 高度变化 → 失效 | DOM 高度变化 → 不影响 |
+| 找不到匹配 → 滚到 0 | 永远能算出一个位置 |
+
+**章节切换**：用 `chapterCharOffset / totalChars` 换算成 progress（之前直接传字符 offset 给 scrollToOffset 也失效了）。
+
+**进度丢失兜底**：`scrollToProgress` 内 total<=0 时 16ms 后重试（DOM 没 layout 完）。
+
+**测试**：tests/core.test.js 新增 T36.1~T36.5 共 13 个测试，全部通过（160/160）。

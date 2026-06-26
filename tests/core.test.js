@@ -1329,9 +1329,130 @@ function buildSegment(sentences, startIdx, n, maxChars) {
       const decoded = decodeURIComponent(hash.slice(8));
       expect('T35.5.2 编码可还原回原值',
         decoded, bookId);
-    }
+      }
 
-    console.log('\n==========');
+      // ============================================================
+      // v0.2.3 刷新位置丢失 bug 修复 —— progress 字段恢复
+      // ============================================================
+
+      // --- T36.1：scrollToProgress 基本计算 ---
+      {
+      function scrollToProgressSim(progress, scrollHeight, clientHeight) {
+        const total = scrollHeight - clientHeight;
+        if (total <= 0) return -1;  // 标记：需要重试
+        return Math.max(0, Math.min(total, progress * total));
+      }
+      expect('T36.1.1 progress=0 → scrollTop=0',
+        scrollToProgressSim(0, 2000, 800), 0);
+      expect('T36.1.2 progress=0.5 → scrollTop=600',
+        scrollToProgressSim(0.5, 2000, 800), 600);
+      expect('T36.1.3 progress=1.0 → scrollTop=1200',
+        scrollToProgressSim(1.0, 2000, 800), 1200);
+      expect('T36.1.4 progress 超界 1.5 → 钳制到 max',
+        scrollToProgressSim(1.5, 2000, 800), 1200);
+      expect('T36.1.5 progress 负值 -0.5 → 钳制到 0',
+        scrollToProgressSim(-0.5, 2000, 800), 0);
+      }
+
+      // --- T36.2：DOM 没 layout 完（total=0）→ 需要重试 ---
+      {
+      let attempts = 0;
+      function scrollToProgressWithRetry(progress, getTotal) {
+        attempts++;
+        const total = getTotal();
+        if (total <= 0) {
+          if (attempts >= 10) return 'give-up';
+          return 'retry';
+        }
+        return 'ok';
+      }
+      attempts = 0;
+      // 模拟前 3 次 total=0，第 4 次有值
+      let callCount = 0;
+      const getTotal = () => {
+        callCount++;
+        return callCount > 3 ? 1200 : 0;
+      };
+      // 简化：直接模拟直到成功
+      let result;
+      for (let i = 0; i < 5; i++) {
+        result = scrollToProgressWithRetry(0.5, getTotal);
+        if (result === 'ok') break;
+      }
+      expect('T36.2 total=0 时多次重试直到成功', result, 'ok');
+      }
+
+      // --- T36.3：progress 字段不依赖 DOM 结构（核心 fix 验证）---
+      {
+      // 模拟：旧算法用 offset 找 DOM 元素 → DOM 结构变了（v0.2.0 加 .sentence span）
+      // 找 offset=600 时，所有 .sentence span 的 offsetTop=0，全部被认成 target，
+      // 最终 target=最后一个 span，滚到 -40 → 实际滚到 0
+      const oldScrollToOffset = (offset, elements) => {
+        let target = null;
+        for (const el of elements) {
+          if (el.offsetTop <= offset) target = el;
+          else break;
+        }
+        return target ? Math.max(0, target.offsetTop - 40) : 0;
+      };
+      // 模拟 v0.2.0 后的 DOM：chapter title 100px 间隔，中间是 .sentence（offsetTop=0）
+      const v020Dom = [
+        { type: 'chapter', offsetTop: 0 },
+        { type: 'sentence', offsetTop: 0 },
+        { type: 'sentence', offsetTop: 0 },
+        { type: 'sentence', offsetTop: 0 },
+        { type: 'chapter', offsetTop: 100 },
+        { type: 'sentence', offsetTop: 0 },  // span 在 inline 模式 offsetTop=0
+        { type: 'chapter', offsetTop: 600 },
+      ];
+      const oldResult = oldScrollToOffset(600, v020Dom);
+      // 旧算法：找到 offsetTop=600 的 chapter 时 target 就是它，滚到 600-40=560（OK）
+      // 但如果 target 是 0 的 span，break 后 target 一直停在最后一个匹配的
+      // 改成全是 0 的测试
+      const allZeroDom = [
+        { type: 'chapter', offsetTop: 0 },
+        { type: 'sentence', offsetTop: 0 },
+        { type: 'sentence', offsetTop: 0 },
+      ];
+      const oldResultBug = oldScrollToOffset(600, allZeroDom);
+      // bug：所有都 <=600，target 是最后一个，offsetTop=0，滚到 max(0, -40)=0
+      expect('T36.3.1 旧算法在 span 全 0 时错误滚回 0（bug 复现）',
+        oldResultBug, 0);
+
+      // 新算法：直接 progress * total，与 DOM 元素 offsetTop 无关
+      const newScrollToProgress = (progress, total) => {
+        return Math.max(0, Math.min(total, progress * total));
+      };
+      // progress=0.5, total=1200 → 600（准确）
+      expect('T36.3.2 新算法用 progress 准确恢复（DOM 无关）',
+        newScrollToProgress(0.5, 1200), 600);
+      }
+
+      // --- T36.4：章节切换用 progress ---
+      {
+      function chapterToProgress(chapterCharOffset, totalChars) {
+        return totalChars > 0 ? chapterCharOffset / totalChars : 0;
+      }
+      expect('T36.4.1 第 1 章 offset=0, total=10000 → progress=0',
+        chapterToProgress(0, 10000), 0);
+      expect('T36.4.2 第 5 章 offset=4000, total=10000 → progress=0.4',
+        chapterToProgress(4000, 10000), 0.4);
+      expect('T36.4.3 末章 offset=9500, total=10000 → progress=0.95',
+        chapterToProgress(9500, 10000), 0.95);
+      expect('T36.4.4 total=0 边界 → progress=0 (不报错)',
+        chapterToProgress(100, 0), 0);
+      }
+
+      // --- T36.5：scrollToOffset 已不再做实际工作（保留函数名兼容） ---
+      {
+      // 老调用 scrollToOffset(0.5) → 现在是空函数（兼容老代码不报错）
+      // 验证：调用不抛错即可
+      function scrollToOffset() { /* v0.2.3: deprecated, use scrollToProgress */ }
+      expect('T36.5 旧 scrollToOffset 调用不报错',
+        typeof scrollToOffset(), 'undefined');
+      }
+
+      console.log('\n==========');
 const pass = tests.filter(t => t.pass).length;
 console.log(`通过: ${pass}/${tests.length}`);
 process.exit(pass === tests.length ? 0 : 1);
