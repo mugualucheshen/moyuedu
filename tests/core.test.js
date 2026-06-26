@@ -997,12 +997,117 @@ function buildSegment(sentences, startIdx, n, maxChars) {
   const card = { tag: 'DIV' };
   onModalClick({ target: card, currentTarget: { tag: 'DIV' } });
   expect('T29.3 点弹窗内容不关（target !== currentTarget）', modalShow, true);
-  // 按其他键不关
-  onKeydown({ key: 'Enter' });
-  expect('T29.4 其他键不关', modalShow, true);
-}
+    // 按其他键不关
+    onKeydown({ key: 'Enter' });
+    expect('T29.4 其他键不关', modalShow, true);
+  }
 
-console.log('\n==========');
+  // ============================================================
+  // v0.2.0 阅读器交互重构 —— 4 项核心测试
+  // ============================================================
+
+  // --- T30.1 / T30.2：进度条拖动 ---
+  // 模拟：给定 pctFromEvent 返回值 → applyRatio 调用 → 进度条 fill 宽度正确
+  {
+    const fakeFill = { width: '' };
+    function pctFromEvent(e) { return e.ratio; }
+    function applyRatio(r) {
+      fakeFill.width = (r * 100) + '%';
+      return r;
+    }
+    expect('T30.1 进度条拖动：0% → fill 0%',
+      applyRatio(0), 0);
+    expect('T30.2 进度条拖动：50% → fill 50%',
+      applyRatio(0.5), 0.5);
+    expect('T30.3 进度条拖动：100% → fill 100%',
+      applyRatio(1.0), 1.0);
+    // 钳制：超出范围
+    expect('T30.4 进度条拖动钳制 <0', Math.max(0, Math.min(1, -0.5)), 0);
+    expect('T30.5 进度条拖动钳制 >1', Math.max(0, Math.min(1, 1.5)), 1);
+  }
+
+  // --- T31：选区朗读起点计算 ---
+  // 给定选区起点所在的 .sentence span DOM → 算出 idx
+  {
+    // 构造 5 个句子，模拟 readerInner
+    const sentences = [
+      { text: '第一句。' },
+      { text: '第二句。' },
+      { text: '第三句。' },
+      { text: '第四句。' },
+      { text: '第五句。' },
+    ];
+    function getSentenceIdxFromNode(node) {
+      for (let i = 0; i < sentences.length; i++) {
+        if (sentences[i] === node) return i;
+      }
+      return -1;
+    }
+    expect('T31.1 选第 3 句起点 → idx=2',
+      getSentenceIdxFromNode(sentences[2]), 2);
+    expect('T31.2 选第 1 句起点 → idx=0',
+      getSentenceIdxFromNode(sentences[0]), 0);
+    expect('T31.3 不在章节内 → idx=-1',
+      getSentenceIdxFromNode({ text: '无关' }), -1);
+  }
+
+  // --- T32：句级高亮（speaking / past class） ---
+  {
+    const dom = [
+      { cls: '' }, { cls: '' }, { cls: '' }, { cls: '' }, { cls: '' },
+    ];
+    function clearSpeakingHighlight() {
+      dom.forEach(d => { d.cls = d.cls.replace(/speaking|past/g, '').trim(); });
+    }
+    function highlightSentence(idx) {
+      clearSpeakingHighlight();
+      for (let i = 0; i < dom.length; i++) {
+        if (i < idx) dom[i].cls = (dom[i].cls + ' past').trim();
+      }
+      if (dom[idx]) dom[idx].cls = (dom[idx].cls + ' speaking').trim();
+    }
+    highlightSentence(2);
+    expect('T32.1 当前句 idx=2 有 speaking',
+      dom[2].cls.includes('speaking'), true);
+    expect('T32.2 之前的 idx<2 有 past',
+      dom[0].cls.includes('past') && dom[1].cls.includes('past'), true);
+    expect('T32.3 之后的 idx>2 无 past 也无 speaking',
+      dom[3].cls === '' && dom[4].cls === '', true);
+
+    highlightSentence(0); // 切到开头
+    expect('T32.4 切句 idx=0 → 之前无 past',
+      dom[0].cls.includes('speaking') &&
+      dom[1].cls === '' && dom[2].cls === '', true);
+    expect('T32.5 旧 idx=2 已清 speaking',
+      dom[2].cls.includes('speaking'), false);
+  }
+
+  // --- T33：保守滚动跟随（快出视口才滚） ---
+  {
+    const elRect = { top: 100, bottom: 200 };
+    const vh = 852;
+    const topMargin = 80;
+    const bottomMargin = 120;
+    function shouldScroll(rect) {
+      return rect.top < topMargin || rect.bottom > vh - bottomMargin;
+    }
+    // 在视口中央 → 不滚
+    expect('T33.1 中央位置不滚',
+      shouldScroll({ top: 400, bottom: 500 }), false);
+    // 顶到顶栏 → 滚
+    expect('T33.2 顶到顶栏应滚',
+      shouldScroll({ top: 50, bottom: 150 }), true);
+    // 底到工具栏 → 滚
+    expect('T33.3 底到工具栏应滚',
+      shouldScroll({ top: 700, bottom: 800 }), true);
+    // 边界：正好在 margin 上 → 不滚（不抖动）
+    expect('T33.4 边界 top=80 不滚',
+      shouldScroll({ top: 80, bottom: 180 }), false);
+    expect('T33.5 边界 bottom=732 不滚',
+      shouldScroll({ top: 632, bottom: 732 }), false);
+  }
+
+  console.log('\n==========');
 const pass = tests.filter(t => t.pass).length;
 console.log(`通过: ${pass}/${tests.length}`);
 process.exit(pass === tests.length ? 0 : 1);

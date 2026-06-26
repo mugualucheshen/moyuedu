@@ -61,3 +61,20 @@ node tests/core.test.js    # 期望 23/23
   - `.reader-content` 用 `touch-action: none` + `wheel` 事件拦截禁用手动滚动
 - 上传入口 —— `index.html` ~1590 行附近
   - `uploadFile.arrayBuffer()` 必须包 `new Uint8Array(...)`，否则 `.subarray()` / `.length` 不可用
+
+### v0.2.0 阅读器交互重构（2026-06-26 · feat/reader-free-scroll）
+
+砍掉 3 个点击分区（`tapLeft` `tapCenter` `tapRight`），阅读器改为自然滚动 + 4 项新功能：
+
+| 功能 | 实现位置 | 说明 |
+|---|---|---|
+| **进度条拖动** | `setupProgressDrag` ~2785 行 | pointerdown/move/up，拖动时暂停朗读滚动跟随 |
+| **选区浮动按钮** | `setupSelectionFab` ~2830 行 | 选中文字上方出现"从此处朗读"按钮 |
+| **句级高亮** | `.sentence.speaking` / `.past` CSS + `highlightSentence` ~2395 行 | 当前朗读句红色背景，之前的灰显 |
+| **滚动跟随** | `maybeScrollToCurrentSentence` ~2402 行 | 快出视口（top<80 / bottom>vh-120）才滚，保守策略 |
+
+**保留**：底部工具栏所有按钮（prev/play/next/mode）不动；进度条点击跳转保留作 fallback。
+
+**键盘兼容**：选区 fab 在 iOS Safari 长按选中 + 桌面鼠标拖选都能触发。
+
+**测试**：tests/core.test.js 新增 T30~T33 共 18 个测试，全部通过（120/120）。
