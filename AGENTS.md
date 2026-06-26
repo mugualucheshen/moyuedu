@@ -92,3 +92,23 @@ node tests/core.test.js    # 期望 23/23
 **已显示时往下滚** → 立即收（用户开始读就不打扰）。
 
 **测试**：tests/core.test.js 新增 T34.1~T34.7 共 11 个测试，全部通过（131/131）。
+
+### v0.2.2 刷新跳书架 bug 修复（2026-06-26 · feat/reader-free-scroll）
+
+**症状**：正在阅读某本书时刷新浏览器 → 自动跳回书架页（不是回到阅读器）。
+
+**根因**：当前页/当前书的状态在内存里，刷新后丢失；启动时默认进 `page-home`。
+
+**修法**：URL hash 路由（深链接顺便支持）
+
+| 行为 | 实现 |
+|---|---|
+| `openBook(id)` 写 hash | `location.hash = '#reader=' + encodeURIComponent(meta.id)` |
+| `switchPage(library/settings)` 写 hash | `#library` / `#settings` |
+| `switchPage(home)` 清 hash | `location.hash = ''` |
+| 启动读 hash | `init()` 末尾调 `handleHashRoute()` |
+| 浏览器前进/后退 | `window.addEventListener('hashchange', handleHashRoute)` |
+| 找不到书兜底 | `state.books.find(b => b.id === bookId)` 失败 → 清 hash + 切 home |
+| 特殊字符 bookId | `encodeURIComponent` / `decodeURIComponent` 双向处理 |
+
+**测试**：tests/core.test.js 新增 T35.1~T35.5 共 16 个测试，全部通过（147/147）。

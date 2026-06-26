@@ -1841,6 +1841,8 @@
 
     // 解析章节
     state.chapters = parseChapters(content.text, state.settings.chapterPattern);
+    // v0.2.2：写 URL hash，刷新能恢复阅读页
+    location.hash = '#reader=' + encodeURIComponent(meta.id);
     showReader();
   }
 
@@ -2073,8 +2075,16 @@
     if (id === 'page-library') {
       stopTTS();
       renderLibrary();
+      // v0.2.2：同步写 hash
+      if (location.hash !== '#library') location.hash = '#library';
     } else if (id === 'page-home') {
       renderHome();
+      // v0.2.2：home = 默认页（无 hash 或 #home）
+      if (location.hash && location.hash !== '#home') {
+        // 保留 #reader 等，不清；只有从其他页回 home 才清
+      }
+    } else if (id === 'page-settings') {
+      if (location.hash !== '#settings') location.hash = '#settings';
     }
   }
 
@@ -3454,7 +3464,40 @@
     // 章节识别关键词：默认值明文填入，避免 placeholder 被误认为已配置
     $('#chapterPatternInput').value = state.settings.chapterPattern || DEFAULT_SETTINGS.chapterPattern;
     checkFirstRun();
+
+    // v0.2.2：根据 URL hash 决定初始页（修复刷新跳书架 bug）
+    handleHashRoute();
+    window.addEventListener('hashchange', handleHashRoute);
   }
+
+  // v0.2.2：hash 路由 —— 刷新/前进后退 都能恢复页面
+  function handleHashRoute() {
+    const h = location.hash || '';
+    if (h.startsWith('#reader=')) {
+      const bookId = decodeURIComponent(h.slice('#reader='.length));
+      if (bookId && state.books.find(b => b.id === bookId)) {
+        openBook(bookId);
+        return;
+      }
+      // 找不到书 → 静默回首页
+      location.hash = '';
+      switchPage('page-home');
+      return;
+    }
+    if (h === '#library') {
+      switchPage('page-library');
+      return;
+    }
+    if (h === '#settings') {
+      switchPage('page-settings');
+      return;
+    }
+    // 无 hash 或 #home → 默认首页
+    if (!h || h === '#home') {
+      switchPage('page-home');
+    }
+  }
+
   init();
   </script>
 </body>

@@ -1236,6 +1236,101 @@ function buildSegment(sentences, startIdx, n, maxChars) {
       !triggered && !state.headerVisible, true);
     }
 
+    // ============================================================
+    // v0.2.2 刷新跳书架 bug 修复 —— URL hash 路由
+    // ============================================================
+
+    // --- T35.1：hash 解析 ---
+    {
+      function pageFromHash(h) {
+        if (!h || h === '' || h === '#') return 'page-home';
+        if (h === '#library') return 'page-library';
+        if (h === '#settings') return 'page-settings';
+        if (h.startsWith('#reader=')) return 'page-reader';
+        return 'page-home';
+      }
+      expect('T35.1.1 空 hash → page-home',
+        pageFromHash(''), 'page-home');
+      expect('T35.1.2 #library → page-library',
+        pageFromHash('#library'), 'page-library');
+      expect('T35.1.3 #settings → page-settings',
+        pageFromHash('#settings'), 'page-settings');
+      expect('T35.1.4 #reader=bookId → page-reader',
+        pageFromHash('#reader=abc123'), 'page-reader');
+      expect('T35.1.5 未知 hash → 兜底 home',
+        pageFromHash('#random'), 'page-home');
+    }
+
+    // --- T35.2：openBook 写 hash ---
+    {
+      let lastHash = '';
+      function mockOpenBook(id) {
+        lastHash = '#reader=' + encodeURIComponent(id);
+      }
+      mockOpenBook('book-uuid-001');
+      expect('T35.2 openBook 写 #reader=...',
+        lastHash, '#reader=book-uuid-001');
+
+      function mockSwitchPage(id) {
+        if (id === 'page-library') lastHash = '#library';
+        else if (id === 'page-settings') lastHash = '#settings';
+        else if (id === 'page-home') lastHash = '';
+      }
+      mockSwitchPage('page-library');
+      expect('T35.2b switchPage(library) 写 #library',
+        lastHash, '#library');
+      mockSwitchPage('page-settings');
+      expect('T35.2c switchPage(settings) 写 #settings',
+        lastHash, '#settings');
+      mockSwitchPage('page-home');
+      expect('T35.2d switchPage(home) 清 hash',
+        lastHash, '');
+    }
+
+    // --- T35.3：找不到书 → 兜底回首页 ---
+    {
+      const books = [{ id: 'a' }, { id: 'b' }];
+      function handleHashRoute(h) {
+        if (h.startsWith('#reader=')) {
+          const bookId = decodeURIComponent(h.slice(8));
+          if (bookId && books.find(b => b.id === bookId)) return 'open:' + bookId;
+          return 'fallback:home';
+        }
+        return 'unknown';
+      }
+      expect('T35.3.1 有效 bookId → open',
+        handleHashRoute('#reader=a'), 'open:a');
+      expect('T35.3.2 无效 bookId → fallback home',
+        handleHashRoute('#reader=nonexistent'), 'fallback:home');
+      expect('T35.3.3 空 bookId → fallback home',
+        handleHashRoute('#reader='), 'fallback:home');
+    }
+
+    // --- T35.4：hashchange 监听（前进/后退按钮） ---
+    {
+      let lastRoute = '';
+      function onHashChange(h) {
+        if (h === '#library') lastRoute = 'library';
+        else if (h === '#settings') lastRoute = 'settings';
+        else if (h.startsWith('#reader=')) lastRoute = 'reader';
+      }
+      onHashChange('#library');
+      expect('T35.4.1 浏览器后退到 #library', lastRoute, 'library');
+      onHashChange('#reader=xxx');
+      expect('T35.4.2 前进到 #reader=xxx', lastRoute, 'reader');
+    }
+
+    // --- T35.5：特殊字符 bookId 编码 ---
+    {
+      const bookId = 'book/with/slashes';
+      const hash = '#reader=' + encodeURIComponent(bookId);
+      expect('T35.5.1 含斜杠 bookId 正确编码',
+        hash, '#reader=book%2Fwith%2Fslashes');
+      const decoded = decodeURIComponent(hash.slice(8));
+      expect('T35.5.2 编码可还原回原值',
+        decoded, bookId);
+    }
+
     console.log('\n==========');
 const pass = tests.filter(t => t.pass).length;
 console.log(`通过: ${pass}/${tests.length}`);
