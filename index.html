@@ -2471,12 +2471,12 @@
     const nextStartIdx = endIdx;
 
     audio.onended = () => {
-      // v1.1.1 修复：双重保险
+      // v0.1.3 修复（关键）：
+      //   v0.1.2 的 bug 是 epochAtPlay(=playEpoch 的值) 去比对 chapterEpoch → 永远不等 → 链式失败
+      //   删掉 chapterEpoch 比对（playEpoch + tts.audio 引用已足够判断"是否被替换"）
       //   1) playEpoch 变了 → 用户已点 prev/next/stop → 不再链式
-      //   2) chapterEpoch 变了 → 章节已切换
-      //   3) tts.audio 已不是自己 → 当前播放的 audio 已被替换
+      //   2) tts.audio 已不是自己 → 当前播放的 audio 已被替换
       if (epochAtPlay !== tts.playEpoch) return;
-      if (epochAtPlay !== tts.scheduler.chapterEpoch) return;
       if (tts.audio !== audio) return;
       tts.isPlaying = false;
       playSentence(nextStartIdx);
@@ -2595,22 +2595,25 @@
       return;
     }
 
-    // v1.1.1 修复：先把上一段彻底停掉（pause + 解绑回调 + 清 src + 释放解码器），
-    // 避免旧 audio.onended 还在跑、导致新句子和旧句子叠加播放
+    // v0.1.3 修复（承袭 v0.1.2 的彻底 stopTTS）：
+    //   进入时若 tts.audio 还在，先彻底停掉（pause + 解绑 + playEpoch +1）。
+    //   新 audio 的 epochAtPlay 直接读 tts.playEpoch —— stopTTS 已经把它推进到新代，
+    //   不需要再 +1，否则 audio.onended 触发时 epochAtPlay 永远落后 1 步 → 不链式 → 播一段就停。
     if (tts.audio) {
-      // 旧链式 onended 在 stopTTS 里会失效（playEpoch +1）
       stopTTS();
     }
 
     // 章节内向前跳（用户点 prev/next），让旧预合成失效，避免回放时拿到过期的
+    // v0.1.3：chapterEpoch++ 必须配套 playEpoch++，因为 onended 只比对 playEpoch
     const curStart = tts.scheduler.currentSegment?.startIdx ?? -1;
     if (idx < curStart) {
       tts.scheduler.chapterEpoch++;
       tts.scheduler.prefetchSet.clear();
+      tts.playEpoch = (tts.playEpoch || 0) + 1;  // 配套 +1，旧 audio.onended 会失效
     }
 
-    // v1.1.1：记录本次播放的代次号，playSegment 内的 onended 拿来比对
-    const epochAtCall = (tts.playEpoch = (tts.playEpoch || 0) + 1);
+    // v0.1.3 单一来源：playEpoch 由 stopTTS 推进，这里只读不写
+    const epochAtCall = tts.playEpoch || 0;
 
     tts.currentSentenceIdx = idx;
     tts.isLoading = true;

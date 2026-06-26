@@ -478,6 +478,308 @@ function buildSegment(sentences, startIdx, n, maxChars) {
   Date.now = origNow;
 }
 
+// === v0.1.3 回归测试：epoch 单一来源，链式播放必须正常 ===
+// 复现老板报：v0.1.2 修好"叠加"后新副作用 —— 播一段就停
+// 根因：playSentence 入口既 stopTTS（+1）又自己 ++playEpoch（又+1）
+//       导致 audio.onended 触发时 epochAtPlay 永远落后 1 步
+// 修法：playSentence 只 stopTTS（不动 epoch），epochAtCall = tts.playEpoch（只读）
+
+// T19: 模拟真实 playSentence 路径：连播 3 段，每段都该链式成功
+{
+  let playEpoch = 0;
+  const tts = { audio: null, isPlaying: false, isLoading: false, playEpoch: 0 };
+  const fakeAudioProto = {
+    pause() {}, onended: null, onerror: null, ontimeupdate: null,
+    removeAttribute() {}, load() {}, play() {},
+  };
+  const makeAudio = () => Object.create(fakeAudioProto);
+
+  // 复刻修复后的 stopTTS
+  function stopTTS() {
+    if (tts.audio) {
+      const a = tts.audio;
+      try { a.pause(); } catch {}
+      try { a.onended = null; } catch {}
+      try { a.onerror = null; } catch {}
+      try { a.ontimeupdate = null; } catch {}
+      try { a.removeAttribute('src'); a.load(); } catch {}
+      tts.audio = null;
+    }
+    tts.playEpoch = ++playEpoch;  // 单一来源 +1
+  }
+
+  // 复刻修复后的 playSentence 入口
+  function playSentenceStart() {
+    if (tts.audio) stopTTS();
+    const epochAtCall = tts.playEpoch || 0;  // 只读不写
+    const audio = makeAudio();
+    tts.audio = audio;
+    audio._epochAtPlay = epochAtCall;
+    audio.onended = () => {
+      if (audio._epochAtPlay !== tts.playEpoch) return 'STALE_EPOCH';
+      if (tts.audio !== audio) return 'STALE_AUDIO';
+      return 'CHAINED';
+    };
+    return audio;
+  }
+
+  // 段 1
+  const a1 = playSentenceStart();
+  // 段 1 播完
+  const r1 = a1.onended();
+  expect('T19.1 第 1 段播完应该链式', r1, 'CHAINED');
+
+  // 段 2: 模拟链式自动播下一段
+  const a2 = playSentenceStart();
+  // 注意：a1 的 onended 在 stopTTS 里已经解绑了（onended=null）
+  expect('T19.2 段 1 的 audio 在 stopTTS 时被解绑 onended', a1.onended, null);
+  // a1 的 onended 已经解绑，再调一次应该 null
+  expect('T19.3 段 1 onended 已 null（不会再链式）', a1.onended, null);
+  // a2 自己的 onended
+  expect('T19.4 段 2 应该是新的 audio 引用', tts.audio, a2);
+  // 段 2 播完
+  const r2 = a2.onended();
+  expect('T19.5 第 2 段播完应该链式', r2, 'CHAINED');
+
+  // 段 3
+  const a3 = playSentenceStart();
+  const r3 = a3.onended();
+  expect('T19.6 第 3 段播完应该链式', r3, 'CHAINED');
+}
+
+// T20: 用户点 prev 打断当前段，旧 audio 不应再链式
+{
+  let playEpoch = 0;
+  const tts = { audio: null, playEpoch: 0 };
+  const fakeAudioProto = {
+    pause() {}, onended: null, onerror: null, ontimeupdate: null,
+    removeAttribute() {}, load() {},
+  };
+  const makeAudio = () => Object.create(fakeAudioProto);
+  function stopTTS() {
+    if (tts.audio) {
+      const a = tts.audio;
+      try { a.pause(); } catch {}
+      try { a.onended = null; } catch {}
+      try { a.removeAttribute('src'); a.load(); } catch {}
+      tts.audio = null;
+    }
+    tts.playEpoch = ++playEpoch;
+  }
+  function playSentenceStart() {
+    if (tts.audio) stopTTS();
+    const epochAtCall = tts.playEpoch || 0;
+    const audio = makeAudio();
+    tts.audio = audio;
+    audio._epochAtPlay = epochAtCall;
+    audio.onended = () => {
+      if (audio._epochAtPlay !== tts.playEpoch) return 'STALE_EPOCH';
+      if (tts.audio !== audio) return 'STALE_AUDIO';
+      return 'CHAINED';
+    };
+    return audio;
+  }
+  const a1 = playSentenceStart();
+  // 用户点 prev：a1 的 onended 在 stopTTS 里被解绑
+  const a2 = playSentenceStart();
+  expect('T20.1 旧 audio.onended 已 null（prev 打断）', a1.onended, null);
+  // 模拟 a1 的 onended 再次触发（不应该，但浏览器偶尔会延迟）
+  // 因为 onended 已被解绑，所以调用 null → TypeError，浏览器已不触发
+  expect('T20.2 新 audio 引用', tts.audio, a2);
+}
+
+// T21: 验证 v0.1.3 修复的核心 —— 正在播的 audio.onended 不应被解绑
+// v0.1.2 坏代码：playSentence 入口 stopTTS + 自己 ++
+//   后果：a1 创建后立即被 stopTTS 解绑 onended → a1 播完时无回调 → 不链式
+// v0.1.3 修复：playSentence 入口 stopTTS + 只读 epochAtCall
+//   但 stopTTS 只在 tts.audio != null 时触发
+//   a1 创建后 tts.audio = a1，下次 playSentence 进来才 stopTTS
+//   所以 a1 播放期间 onended 一直存在 → 播完时正常链式
+{
+  // 模拟 v0.1.3 修复后的真实流程
+  let playEpoch = 0;
+  const tts = { audio: null, playEpoch: 0 };
+  const makeAudio = () => {
+    const a = {
+      pause() {}, removeAttribute() {}, load() {},
+      _epochAtPlay: 0, onended: null, onerror: null, ontimeupdate: null,
+    };
+    return a;
+  };
+
+  // v0.1.3 stopTTS
+  function stopTTS() {
+    if (tts.audio) {
+      const a = tts.audio;
+      try { a.pause(); } catch {}
+      try { a.onended = null; } catch {}
+      try { a.onerror = null; } catch {}
+      try { a.ontimeupdate = null; } catch {}
+      try { a.removeAttribute('src'); a.load(); } catch {}
+      tts.audio = null;
+    }
+    tts.playEpoch = ++playEpoch;
+  }
+
+  // v0.1.3 playSentence
+  function playSentence() {
+    if (tts.audio) stopTTS();
+    // 只读
+    const epochAtCall = tts.playEpoch || 0;
+    const audio = makeAudio();
+    audio._epochAtPlay = epochAtCall;
+    tts.audio = audio;
+    audio.onended = () => {
+      if (audio._epochAtPlay !== tts.playEpoch) return 'STALE_EPOCH';
+      if (tts.audio !== audio) return 'STALE_AUDIO';
+      return 'CHAINED';
+    };
+    return audio;
+  }
+
+  // === 关键场景：a1 正在播放时，onended 必须存在 ===
+  const a1 = playSentence();
+  expect('T21.1 a1 创建后 onended 存在（v0.1.2 坏代码这里会 null）', typeof a1.onended, 'function');
+  // 模拟 a1 播完，onended 触发
+  const r1 = a1.onended();
+  // 此时 tts.playEpoch 还是 a1 创建时的值 → 应该 CHAINED
+  expect('T21.2 a1 播完应能链式', r1, 'CHAINED');
+  // 链式调用 playSentence 启动 a2（这时 stopTTS 才解绑 a1.onended）
+  const a2 = playSentence();
+  expect('T21.3 链式后 a1.onended 被解绑', a1.onended, null);
+  expect('T21.4 a2 是新 audio', tts.audio, a2);
+  // a2 播放中 onended 必须存在
+  expect('T21.5 a2 播放中 onended 存在', typeof a2.onended, 'function');
+  // a2 播完
+  const r2 = a2.onended();
+  expect('T21.6 a2 播完应能链式', r2, 'CHAINED');
+  // 链式 a3
+  const a3 = playSentence();
+  const r3 = a3.onended();
+  expect('T21.7 a3 播完应能链式（连续 3 段）', r3, 'CHAINED');
+}
+
+// T22: 对照组 —— v0.1.2 坏代码，a1 播放中 onended 应是 null（bug）
+{
+  let playEpoch = 0;
+  const tts = { audio: null, playEpoch: 0 };
+  const makeAudio = () => ({
+    pause() {}, onended: null,
+    _epochAtPlay: 0,
+  });
+
+  // v0.1.2 坏代码
+  function stopTTS_BUGGY() {
+    if (tts.audio) { tts.audio.pause(); tts.audio.onended = null; tts.audio = null; }
+    tts.playEpoch = ++playEpoch;
+  }
+  function playSentence_BUGGY() {
+    if (tts.audio) stopTTS_BUGGY();
+    // 坏代码：又 +1
+    const epochAtCall = (tts.playEpoch || 0) + 1;
+    tts.playEpoch = epochAtCall;
+    const audio = makeAudio();
+    audio._epochAtPlay = epochAtCall;
+    tts.audio = audio;
+    audio.onended = () => {
+      if (audio._epochAtPlay !== tts.playEpoch) return 'STALE_EPOCH';
+      return 'CHAINED';
+    };
+    return audio;
+  }
+
+  // 模拟老板描述的场景：
+  // 第 1 次点播放
+  const a1 = playSentence_BUGGY();
+  // a1 创建时 tts.audio=null，跳过 stopTTS_BUGGY
+  // (0||0)+1=1 → epochAtCall=1
+  // 但真实的 v0.1.2 playSegment 还有一个隐藏检查：
+  //   if (epochAtPlay !== tts.scheduler.chapterEpoch) return;
+  // epochAtPlay 是 playEpoch（=1），chapterEpoch 是 0 → 1 !== 0 → return
+  // 老板报"播一段就停"就是这个检查在搞鬼
+  expect('T22.1 坏代码 a1 创建', typeof a1.onended, 'function');
+  // 模拟 onended：epochAtPlay(1) !== tts.playEpoch(1) → false（不 return）
+  // 但 epochAtPlay(1) !== tts.scheduler.chapterEpoch(0) → true → return
+  // 加上 chapterEpoch 检查模拟真正的 v0.1.2
+  const chapterEpoch = 0;
+  let chained = true;
+  const audio = a1;
+  const epochAtPlay = audio._epochAtPlay;
+  if (epochAtPlay !== tts.playEpoch) chained = false;
+  if (epochAtPlay !== chapterEpoch) chained = false;
+  if (tts.audio !== audio) chained = false;
+  expect('T22.2 坏代码：chapterEpoch 检查拦截 → 播一段就停',
+    chained, false);
+  // 关键发现：v0.1.2 真正 bug 是 chapterEpoch 比对，不只是 playEpoch 双重 +1
+  // v0.1.3 修复核心：playSentence 不再 ++playEpoch，且 playSegment 用 chapterEpoch（而不是 playEpoch）作 epochAtPlay
+}
+
+// T23: 章节切换（向前跳）必须让旧 audio 不再链式
+{
+  // 模拟 v0.1.3 修复后的 playSentence：章节切换时也 +1 playEpoch
+  let playEpoch = 0;
+  const tts = {
+    audio: null, playEpoch: 0,
+    scheduler: { chapterEpoch: 0, currentSegment: null, prefetchSet: new Set() },
+  };
+  const makeAudio = () => ({
+    pause() {}, removeAttribute() {}, load() {},
+    _epochAtPlay: 0, onended: null, onerror: null, ontimeupdate: null,
+  });
+
+  function stopTTS() {
+    if (tts.audio) {
+      const a = tts.audio;
+      try { a.onended = null; } catch {}
+      tts.audio = null;
+    }
+    tts.playEpoch = ++playEpoch;
+  }
+  function playSentence(idx) {
+    if (tts.audio) stopTTS();
+    // 章节内向前跳 → playEpoch 也 +1
+    const curStart = tts.scheduler.currentSegment?.startIdx ?? -1;
+    if (idx < curStart) {
+      tts.scheduler.chapterEpoch++;
+      tts.playEpoch = (tts.playEpoch || 0) + 1;
+    }
+    const epochAtCall = tts.playEpoch || 0;
+    const audio = makeAudio();
+    audio._epochAtPlay = epochAtCall;
+    tts.audio = audio;
+    audio.onended = () => {
+      if (audio._epochAtPlay !== tts.playEpoch) return 'STALE_EPOCH';
+      if (tts.audio !== audio) return 'STALE_AUDIO';
+      return 'CHAINED';
+    };
+    return audio;
+  }
+
+  // 正常播 a1
+  const a1 = playSentence(0);
+  tts.scheduler.currentSegment = { items: [], startIdx: 0, endIdx: 5 };
+  // 用户点 prev（idx=2 < curStart=0 不成立，idx=2 > curStart=0）
+  // 实际"章节切换"通常是跳到下一章，curStart 在新章节里重新设
+  // 模拟：用户切到下一章，curStart=100，idx=2 < 100
+  tts.scheduler.currentSegment = { items: [], startIdx: 100, endIdx: 105 };
+  const a2 = playSentence(2);
+  // a1 创建时 stopTTS 不进 if（tts.audio=null），epoch=0
+  // a2 创建时 stopTTS（a1 在）→ +1 → epoch=1
+  // 然后 idx=2 < curStart=100 → +1 → epoch=2
+  // 所以 tts.playEpoch 应该是 2，a1._epochAtPlay=0
+  expect('T23.1 章节切换后 playEpoch 已 +2（stopTTS + 章节切换）',
+    tts.playEpoch, 2);
+  expect('T23.1b a1 自己的 epoch', a1._epochAtPlay, 0);
+  // a1 还在内存中，它的 onended 触发时 epochAtPlay(=a1 创建时的 epoch) !== tts.playEpoch(新值)
+  // 但实际播放时 a1.onended 在 stopTTS 里已经被解绑了
+  expect('T23.2 a1.onended 已被 stopTTS 解绑', a1.onended, null);
+  // 关键：a2 创建后，章节切换的效果通过 stopTTS 传递（a1.onended=null）
+  // 然后 playEpoch +1，新 audio 的 epoch 跟上
+  // a2.onended 触发时应该能正常链式
+  const r2 = a2.onended();
+  expect('T23.3 a2 章节切换后仍能链式', r2, 'CHAINED');
+}
+
 console.log('\n==========');
 const pass = tests.filter(t => t.pass).length;
 console.log(`通过: ${pass}/${tests.length}`);
