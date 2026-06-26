@@ -285,16 +285,19 @@
     }
     .book-meta-dot { width: 3px; height: 3px; border-radius: 50%; background: currentColor; }
     .book-card .delete-btn {
-      position: absolute; top: 6px; right: 6px;
+      position: absolute; top: 6px; right: 42px;  /* 留出 42px 给收藏按钮 */
       width: 28px; height: 28px;
-      background: rgba(0,0,0,0.55);
+      background: rgba(0,0,0,0.45);
       color: #fff;
       border-radius: 50%;
-      display: none; align-items: center; justify-content: center;
+      display: flex; align-items: center; justify-content: center;
       backdrop-filter: blur(8px);
+      opacity: 0.7;
+      transition: opacity 0.15s, transform 0.1s;
+      z-index: 2;
     }
-    .book-card.editing .delete-btn { display: flex; }
-    .book-card.editing { animation: none; transform: scale(0.97); }
+    .book-card .delete-btn:hover,
+    .book-card .delete-btn:active { opacity: 1; transform: scale(1.08); }
     .delete-btn svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2.4; }
 
     .empty-state {
@@ -1403,7 +1406,6 @@
     settings: { ...DEFAULT_SETTINGS },
     sortBy: 'recent',
     searchQuery: '',
-    editingLibrary: false,
 
     // 阅读器状态
     currentBookId: null,
@@ -1736,8 +1738,8 @@
       const firstChar = b.title.replace(/\s/g, '').charAt(0) || '墨';
       const isFav = !!b.favorite;
       return `
-        <div class="book-card ${state.editingLibrary ? 'editing' : ''}" data-id="${b.id}">
-          <button class="delete-btn" data-id="${b.id}" aria-label="删除">
+        <div class="book-card" data-id="${b.id}">
+          <button class="delete-btn" data-id="${b.id}" aria-label="删除《${b.title}》" title="删除">
             <svg viewBox="0 0 24 24"><path d="M6 6 18 18M18 6 6 18"/></svg>
           </button>
           <button class="fav-btn ${isFav ? 'on' : ''}" data-id="${b.id}" aria-label="收藏">
@@ -1768,7 +1770,6 @@
       el.addEventListener('click', (e) => {
         if (e.target.closest('.delete-btn')) return;
         if (e.target.closest('.fav-btn')) return;
-        if (state.editingLibrary) return;
         openBook(id);
       });
     });
@@ -2079,6 +2080,15 @@
     $('#deleteModal').classList.add('show');
   }
   $('#deleteCancel').addEventListener('click', () => $('#deleteModal').classList.remove('show'));
+  // v0.1.9 增强：点击遮罩 / 按 ESC 也能关闭删除确认弹窗
+  $('#deleteModal').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) $('#deleteModal').classList.remove('show');
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && $('#deleteModal').classList.contains('show')) {
+      $('#deleteModal').classList.remove('show');
+    }
+  });
   $('#deleteConfirm').addEventListener('click', async () => {
     if (!deleteTargetId) return;
     const id = deleteTargetId;
@@ -2837,31 +2847,9 @@
   $('#readerSettingsBtn').addEventListener('click', openReaderSettings);
   // closeSettings 按钮已删，改为点击 panel 外区域关闭（见下方 document click 监听）
 
-  // 长按进入编辑模式（删除）
-  let pressTimer = null;
-  let pressTarget = null;
-  $('#bookGrid').addEventListener('touchstart', (e) => {
-    const card = e.target.closest('.book-card');
-    if (!card) return;
-    pressTarget = card;
-    pressTimer = setTimeout(() => {
-      state.editingLibrary = true;
-      renderLibrary();
-      showToast('点击红色 × 删除（点空白处退出）');
-    }, 600);
-  }, { passive: true });
-  $('#bookGrid').addEventListener('touchend', () => {
-    clearTimeout(pressTimer);
-  });
-  $('#bookGrid').addEventListener('touchmove', () => {
-    clearTimeout(pressTimer);
-  });
-  document.addEventListener('click', (e) => {
-    if (state.editingLibrary && !e.target.closest('.book-card') && !e.target.closest('.sort-btn') && !e.target.closest('.search-box')) {
-      state.editingLibrary = false;
-      renderLibrary();
-    }
-  });
+  // v0.1.9 优化删除：长按进入编辑模式已彻底删除
+  // 改为卡片右上角常驻 × 按钮（CSS .delete-btn），点击 → askDelete 弹二次确认
+  // 见 renderLibrary() 里的 .book-card HTML
 
   // 搜索
   $('#searchInput').addEventListener('input', debounce((e) => {
