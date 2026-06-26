@@ -563,6 +563,21 @@
       transition: transform 0.1s, background 0.15s;
     }
     .selection-fab:active { transform: scale(0.95); background: rgba(200, 60, 60, 0.95); }
+    /* v0.2.1：顶部 12px 触发条（常驻） —— 隐藏的入口 */
+    .reader-top-grip {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: 12px;
+      z-index: 25;
+      background: transparent;
+      border-bottom: 0.5px solid transparent;
+      transition: border-color 0.2s;
+      cursor: pointer;
+    }
+    .reader-top-grip:hover,
+    .reader-top-grip:active {
+      border-bottom-color: rgba(0,0,0,0.08);
+    }
     .reader-player-inner {
       display: flex; align-items: center; gap: 12px;
       padding: 10px 16px 10px;
@@ -966,6 +981,8 @@
       <div class="reader-content" id="readerContent">
         <div class="reader-inner" id="readerInner"></div>
       </div>
+      <!-- v0.2.1：顶部 12px 触发条（隐藏的入口） -->
+      <div class="reader-top-grip" id="readerTopGrip"></div>
 
       <div class="reader-header" id="readerHeader">
         <div class="reader-header-inner">
@@ -1891,6 +1908,29 @@
     $('#readerContent').classList.toggle('player-hidden', !state.playerVisible);
   }
 
+  // v0.2.1：toggleChrome —— 工具栏呼出/隐藏统一入口 + 8 秒自动收
+  let chromeHideTimer = null;
+  function toggleChrome(forceShow) {
+    const willShow = forceShow != null ? forceShow : !state.headerVisible;
+    state.headerVisible = willShow;
+    state.playerVisible = willShow;
+    updateChrome();
+    if (chromeHideTimer) { clearTimeout(chromeHideTimer); chromeHideTimer = null; }
+    if (willShow) {
+      // 8 秒不动 → 自动收
+      chromeHideTimer = setTimeout(() => {
+        state.headerVisible = false;
+        state.playerVisible = false;
+        updateChrome();
+        chromeHideTimer = null;
+      }, 8000);
+    }
+  }
+  // 用户操作工具栏按钮 = 活跃，重置 8 秒计时
+  function pokeChrome() {
+    if (state.headerVisible) toggleChrome(true);
+  }
+
   function scrollToOffset(offset) {
     // 找到包含该 offset 的元素
     const inner = $('#readerInner');
@@ -2798,6 +2838,45 @@
     $('#readerProgressFill').style.width = (prog * 100) + '%';
   }, 600);
   $('#readerContent').addEventListener('scroll', savePosDebounced);
+
+  // v0.2.1：工具栏显隐联动 —— 滚到顶自动呼出；开始往下滚自动收
+  $('#readerContent').addEventListener('scroll', () => {
+    const top = $('#readerContent').scrollTop;
+    if (top === 0 && !state.headerVisible) {
+      // 滚到顶 → 呼出（让用户换章）
+      toggleChrome(true);
+    } else if (state.headerVisible && top > 50) {
+      // 已显示 + 开始读 → 自动收
+      if (chromeHideTimer) { clearTimeout(chromeHideTimer); chromeHideTimer = null; }
+      state.headerVisible = false;
+      state.playerVisible = false;
+      updateChrome();
+    }
+  });
+
+  // v0.2.1：顶部 12px 触发条 —— 点击 + 下滑手势
+  $('#readerTopGrip').addEventListener('click', () => toggleChrome());
+  let gripTouchStartY = null;
+  $('#readerTopGrip').addEventListener('touchstart', (e) => {
+    gripTouchStartY = e.touches[0].clientY;
+  }, { passive: true });
+  $('#readerTopGrip').addEventListener('touchmove', (e) => {
+    if (gripTouchStartY == null) return;
+    const dy = e.touches[0].clientY - gripTouchStartY;
+    if (dy > 30) {
+      toggleChrome(true);
+      gripTouchStartY = null;
+    }
+  }, { passive: true });
+  $('#readerTopGrip').addEventListener('touchend', () => {
+    gripTouchStartY = null;
+  });
+
+  // v0.2.1：用户操作工具栏按钮 = 活跃，重置 8 秒计时
+  ['readerBack', 'readerSettingsBtn', 'playerPrev', 'playerPlay', 'playerNext', 'playerMode'].forEach(id => {
+    const el = $('#' + id);
+    if (el) el.addEventListener('click', pokeChrome);
+  });
 
   $('#readerProgressBar').addEventListener('click', (e) => {
     if (!state.currentBook) return;

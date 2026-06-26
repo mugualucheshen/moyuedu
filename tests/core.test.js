@@ -1105,9 +1105,138 @@ function buildSegment(sentences, startIdx, n, maxChars) {
       shouldScroll({ top: 80, bottom: 180 }), false);
     expect('T33.5 边界 bottom=732 不滚',
       shouldScroll({ top: 632, bottom: 732 }), false);
-  }
+    }
 
-  console.log('\n==========');
+    // ============================================================
+    // v0.2.1 工具栏呼出入口 —— 顶部条 + 滚到顶自动呼出 + 8 秒自动收
+    // ============================================================
+
+    // --- T34.1：滚到顶部 + 隐藏状态 → 自动呼出 ---
+    {
+    const state = { headerVisible: false, playerVisible: false };
+    function scrollHandler(top, currentState) {
+      if (top === 0 && !currentState.headerVisible) {
+        currentState.headerVisible = true;
+        currentState.playerVisible = true;
+      } else if (currentState.headerVisible && top > 50) {
+        currentState.headerVisible = false;
+        currentState.playerVisible = false;
+      }
+    }
+    scrollHandler(0, state);
+    expect('T34.1 滚到顶 + 隐藏 → 自动呼出', state.headerVisible, true);
+    expect('T34.1b 滚到顶 + 隐藏 → player 也显示', state.playerVisible, true);
+    }
+
+    // --- T34.2：已显示 + 向下滚 >50 → 自动隐藏 ---
+    {
+    const state = { headerVisible: true, playerVisible: true };
+    function scrollHandler(top, currentState) {
+      if (top === 0 && !currentState.headerVisible) { /* skip */ }
+      else if (currentState.headerVisible && top > 50) {
+        currentState.headerVisible = false;
+        currentState.playerVisible = false;
+      }
+    }
+    scrollHandler(60, state);
+    expect('T34.2 已显示 + 向下滚 60px → 自动隐藏',
+      state.headerVisible, false);
+    expect('T34.2b 已显示 + 向下滚 → player 也隐藏',
+      state.playerVisible, false);
+    }
+
+    // --- T34.3：滚 30px（在 50 阈值内）→ 不隐藏 ---
+    {
+    const state = { headerVisible: true, playerVisible: true };
+    function scrollHandler(top, currentState) {
+      if (currentState.headerVisible && top > 50) {
+        currentState.headerVisible = false;
+        currentState.playerVisible = false;
+      }
+    }
+    scrollHandler(30, state);
+    expect('T34.3 滚 30px（< 50 阈值）→ 仍显示',
+      state.headerVisible, true);
+    }
+
+    // --- T34.4：顶部条点击 → toggle ---
+    {
+    const state = { headerVisible: false, playerVisible: false };
+    function toggle(s) {
+      s.headerVisible = !s.headerVisible;
+      s.playerVisible = s.headerVisible;
+    }
+    toggle(state);
+    expect('T34.4 顶部条点击 → 隐藏→显示', state.headerVisible, true);
+    toggle(state);
+    expect('T34.4b 顶部条再点 → 显示→隐藏', state.headerVisible, false);
+    }
+
+    // --- T34.5：8 秒自动隐藏（fake timer） ---
+    {
+    let now = 1000;
+    let hideTimer = null;
+    function setTimeoutFake(fn, delay) { hideTimer = { fn, fireAt: now + delay }; }
+    function clearTimeoutFake() { hideTimer = null; }
+    const state = { headerVisible: true, playerVisible: true };
+    function toggleChromeShow() {
+      state.headerVisible = true;
+      state.playerVisible = true;
+      if (hideTimer) clearTimeoutFake();
+      setTimeoutFake(() => {
+        state.headerVisible = false;
+        state.playerVisible = false;
+      }, 8000);
+    }
+    toggleChromeShow();
+    now += 7999;
+    if (hideTimer && now >= hideTimer.fireAt) hideTimer.fn();
+    expect('T34.5 7.999 秒仍未隐藏', state.headerVisible, true);
+    now += 1;
+    if (hideTimer && now >= hideTimer.fireAt) hideTimer.fn();
+    expect('T34.5b 8 秒整 → 自动隐藏', state.headerVisible, false);
+    }
+
+    // --- T34.6：下滑手势 > 30px → 呼出 ---
+    {
+    const state = { headerVisible: false, playerVisible: false };
+    let touchStartY = null;
+    function onTouchStart(y) { touchStartY = y; }
+    function onTouchMove(y) {
+      if (touchStartY == null) return false;
+      const dy = y - touchStartY;
+      if (dy > 30) {
+        state.headerVisible = true;
+        state.playerVisible = true;
+        touchStartY = null;
+        return true;
+      }
+      return false;
+    }
+    onTouchStart(5);  // 顶部 12px 内
+    const triggered = onTouchMove(50);  // 下滑 45px
+    expect('T34.6 顶部下滑 45px > 30 → 呼出',
+      triggered && state.headerVisible, true);
+    }
+
+    // --- T34.7：下滑手势 20px → 不触发（防误触） ---
+    {
+    const state = { headerVisible: false, playerVisible: false };
+    let touchStartY = null;
+    function onTouchStart(y) { touchStartY = y; }
+    function onTouchMove(y) {
+      if (touchStartY == null) return false;
+      const dy = y - touchStartY;
+      if (dy > 30) { state.headerVisible = true; touchStartY = null; return true; }
+      return false;
+    }
+    onTouchStart(5);
+    const triggered = onTouchMove(25);  // 只下滑 20px
+    expect('T34.7 下滑 20px < 30 → 不触发',
+      !triggered && !state.headerVisible, true);
+    }
+
+    console.log('\n==========');
 const pass = tests.filter(t => t.pass).length;
 console.log(`通过: ${pass}/${tests.length}`);
 process.exit(pass === tests.length ? 0 : 1);
