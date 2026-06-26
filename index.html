@@ -2290,10 +2290,17 @@
   };
   function stopTTS() {
     if (tts.audio) {
-      try { tts.audio.pause(); } catch {}
+      const a = tts.audio;
+      // 1) 立即停
+      try { a.pause(); } catch {}
+      // 2) 解绑所有回调（防止老 audio 播完时 onended / timeupdate 还在跑）
+      try { a.onended = null; } catch {}
+      try { a.onerror = null; } catch {}
+      try { a.ontimeupdate = null; } catch {}
+      // 3) 清 src（让浏览器立刻释放解码器，data URL 也能立即停）
+      try { a.removeAttribute('src'); a.load(); } catch {}
       tts.audio = null;
     }
-    // 不再 revoke Blob URL：base64 data URL 方案下没有 Blob URL，无须清理
     tts.isPlaying = false;
     tts.isLoading = false;
     // v1.1：让所有在飞的预合成任务识别后退出
@@ -2301,6 +2308,8 @@
     tts.scheduler.prefetchSet.clear();
     tts.scheduler.prefetchInflight = 0;
     tts.scheduler.currentSegment = null;
+    // v1.1.1 修复：把代次号 +1，让任何旧链式 onended 立刻作废
+    tts.playEpoch = (tts.playEpoch || 0) + 1;
     clearSpeakingHighlight();
     updatePlayUI();
   }
@@ -2402,7 +2411,8 @@
   }
 
   // 段级播放：拿到 segment 的 items / startIdx / endIdx，查缓存/合成、播放
-  async function playSegment(items, startIdx, endIdx) {
+  // v1.1.1 新增 epochAtCall：onended 触发时若代次号已变（用户点了 prev/next）就立刻 return，绝不链式
+  async function playSegment(items, startIdx, endIdx, epochAtCall) {
     if (items.length === 0) {
       // 没句子可播（极端），跳到下一段
       return playSentence(endIdx);
@@ -2457,20 +2467,28 @@
     const audio = new Audio(audioSrc);
     audio.playbackRate = parseFloat(state.settings.speed) || 1.0;
 
-    const epochAtPlay = tts.scheduler.chapterEpoch;
+    const epochAtPlay = (epochAtCall != null) ? epochAtCall : tts.scheduler.chapterEpoch;
     const nextStartIdx = endIdx;
 
     audio.onended = () => {
-      if (epochAtPlay !== tts.scheduler.chapterEpoch) return; // 章节已切换
+      // v1.1.1 修复：双重保险
+      //   1) playEpoch 变了 → 用户已点 prev/next/stop → 不再链式
+      //   2) chapterEpoch 变了 → 章节已切换
+      //   3) tts.audio 已不是自己 → 当前播放的 audio 已被替换
+      if (epochAtPlay !== tts.playEpoch) return;
+      if (epochAtPlay !== tts.scheduler.chapterEpoch) return;
+      if (tts.audio !== audio) return;
       tts.isPlaying = false;
       playSentence(nextStartIdx);
     };
     audio.onerror = () => {
+      if (tts.audio !== audio) return; // 已被新 audio 取代，不弹错误
       showToast('音频播放失败');
       stopTTS();
     };
     // 段内高亮：根据 currentTime / duration 比例定位字符位置，再二分查表
     audio.ontimeupdate = () => {
+      if (tts.audio !== audio) return; // 已被替换，不再高亮
       if (!audio.duration || isNaN(audio.duration)) return;
       const ratio = Math.min(1, Math.max(0, audio.currentTime / audio.duration));
       const charPos = Math.min(tts.scheduler.totalChars - 1, Math.floor(ratio * tts.scheduler.totalChars));
@@ -2577,12 +2595,22 @@
       return;
     }
 
+    // v1.1.1 修复：先把上一段彻底停掉（pause + 解绑回调 + 清 src + 释放解码器），
+    // 避免旧 audio.onended 还在跑、导致新句子和旧句子叠加播放
+    if (tts.audio) {
+      // 旧链式 onended 在 stopTTS 里会失效（playEpoch +1）
+      stopTTS();
+    }
+
     // 章节内向前跳（用户点 prev/next），让旧预合成失效，避免回放时拿到过期的
     const curStart = tts.scheduler.currentSegment?.startIdx ?? -1;
     if (idx < curStart) {
       tts.scheduler.chapterEpoch++;
       tts.scheduler.prefetchSet.clear();
     }
+
+    // v1.1.1：记录本次播放的代次号，playSegment 内的 onended 拿来比对
+    const epochAtCall = (tts.playEpoch = (tts.playEpoch || 0) + 1);
 
     tts.currentSentenceIdx = idx;
     tts.isLoading = true;
@@ -2599,7 +2627,7 @@
     }
 
     try {
-      await playSegment(seg.items, seg.items[0].idx, seg.endIdx);
+      await playSegment(seg.items, seg.items[0].idx, seg.endIdx, epochAtCall);
     } catch (e) {
       console.error(e);
       showToast('TTS 失败：' + (e.message || '未知错误'));
@@ -2656,10 +2684,21 @@
     // 从当前句开始
     playSentence(tts.currentSentenceIdx || 0);
   });
+  // v1.1.1 修复：200ms 节流，防止用户双击 prev/next 触发两次 playSentence
+  // （即便内部已有 stopTTS 防御，加节流让按钮手感更稳）
+  let _navThrottle = 0;
+  function navThrottleGuard() {
+    const now = Date.now();
+    if (now - _navThrottle < 200) return false;
+    _navThrottle = now;
+    return true;
+  }
   $('#playerPrev').addEventListener('click', () => {
+    if (!navThrottleGuard()) return;
     if (tts.currentSentenceIdx > 0) playSentence(tts.currentSentenceIdx - 1);
   });
   $('#playerNext').addEventListener('click', () => {
+    if (!navThrottleGuard()) return;
     playSentence(tts.currentSentenceIdx + 1);
   });
   $('#playerMode').addEventListener('click', openTTSModal);

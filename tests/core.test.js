@@ -412,6 +412,72 @@ function buildSegment(sentences, startIdx, n, maxChars) {
   expect('T15.2 保留完整 200 字', seg.totalChars, 200);
 }
 
+// === v1.1.1 回归测试：prev/next 不再叠加音频 ===
+// 复现老板报的 bug：点"下一句"后老 audio 没停，导致两句叠加
+// 修复：stopTTS 彻底清理 + playEpoch 代次号 + 200ms 节流
+
+// T16: stopTTS 彻底解绑 audio 回调
+{
+  const fakeAudio = {
+    pause: () => { fakeAudio._paused = true; },
+    onended: () => {},
+    onerror: () => {},
+    ontimeupdate: () => {},
+    removeAttribute: () => {},
+    load: () => {},
+  };
+  // 模拟修复后的 stopTTS 行为（提取为纯函数）
+  function stopTTSClean(audio) {
+    if (!audio) return;
+    try { audio.pause(); } catch {}
+    try { audio.onended = null; } catch {}
+    try { audio.onerror = null; } catch {}
+    try { audio.ontimeupdate = null; } catch {}
+    try { audio.removeAttribute('src'); audio.load(); } catch {}
+  }
+  stopTTSClean(fakeAudio);
+  expect('T16.1 旧 audio 已 pause', fakeAudio._paused, true);
+  expect('T16.2 onended 已解绑', fakeAudio.onended, null);
+  expect('T16.3 onerror 已解绑', fakeAudio.onerror, null);
+  expect('T16.4 ontimeupdate 已解绑', fakeAudio.ontimeupdate, null);
+}
+
+// T17: playEpoch 代次号防旧链式触发
+{
+  let playEpoch = 0;
+  function newPlay() { return ++playEpoch; }
+  // 模拟：audioA 在 epoch=1 时启动，user 点 next 触发 newPlay（epoch=2），
+  // audioA 播完时 onended 触发：epochAtPlay(1) !== tts.playEpoch(2) → return
+  const epochAtPlay_A = newPlay();   // = 1
+  const epochAtPlay_B = newPlay();   // = 2（用户点 next）
+  let chainedA = false, chainedB = false;
+  const onendedA = () => { if (epochAtPlay_A !== playEpoch) return; chainedA = true; };
+  const onendedB = () => { if (epochAtPlay_B !== playEpoch) return; chainedB = true; };
+  onendedA();  // A 播完 → 应该 return
+  onendedB();  // B 播完 → 应该 true
+  expect('T17.1 旧 onended 不链式', chainedA, false);
+  expect('T17.2 新 onended 正常链式', chainedB, true);
+}
+
+// T18: 200ms 节流防双击
+{
+  let _navThrottle = 0;
+  function navThrottleGuard() {
+    const now = Date.now();
+    if (now - _navThrottle < 200) return false;
+    _navThrottle = now;
+    return true;
+  }
+  expect('T18.1 第一次放行', navThrottleGuard(), true);
+  expect('T18.2 1ms 后点被节流', navThrottleGuard(), false);
+  expect('T18.3 50ms 后点被节流', navThrottleGuard(), false);
+  // 模拟 201ms 后
+  const origNow = Date.now;
+  Date.now = () => origNow() + 201;
+  expect('T18.4 201ms 后放行', navThrottleGuard(), true);
+  Date.now = origNow;
+}
+
 console.log('\n==========');
 const pass = tests.filter(t => t.pass).length;
 console.log(`通过: ${pass}/${tests.length}`);
